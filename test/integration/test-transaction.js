@@ -124,36 +124,22 @@ describe('transaction', () => {
     });
   });
 
-  it('transaction commit', (done) => {
-    shareConn
-      .commit()
-      .then(() => {
-        return shareConn.query('SET autocommit=0');
-      })
-      .then(() => {
-        assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 0);
-        assert.equal(shareConn.info.status & ServerStatus.STATUS_AUTOCOMMIT, 0);
-
-        return shareConn.beginTransaction();
-      })
-      .then(() => {
-        assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
-        return shareConn.query("INSERT INTO testTransaction values ('test')");
-      })
-      .then(() => {
-        assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
-        return shareConn.commit();
-      })
-      .then(() => {
-        assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 0);
-        return shareConn.query('SELECT count(*) as nb FROM testTransaction');
-      })
-      .then((rows) => {
-        assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
-        assert.equal(rows[0].nb, 1);
-        done();
-      })
-      .catch(done);
+  it('transaction commit', async function () {
+    await shareConn.commit();
+    await shareConn.query('SET autocommit=0');
+    assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 0);
+    assert.equal(shareConn.info.status & ServerStatus.STATUS_AUTOCOMMIT, 0);
+    await shareConn.beginTransaction();
+    assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
+    await shareConn.query("INSERT INTO testTransaction values ('test')");
+    assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
+    await shareConn.commit();
+    assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 0);
+    if (process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha') {
+      const rows = await shareConn.query('SELECT count(*) as nb FROM testTransaction');
+      assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
+      assert.equal(rows[0].nb, 1);
+    }
   });
 
   it('transaction commit error handling', function (done) {
@@ -172,11 +158,7 @@ describe('transaction', () => {
           return conn.query("INSERT INTO testTransaction1 values ('test')");
         })
         .then(() => {
-          process.nextTick(
-            conn.__tests
-              .getSocket()
-              .destroy.bind(conn.__tests.getSocket(), new Error('close forced'))
-          );
+          process.nextTick(conn.__tests.getSocket().destroy.bind(conn.__tests.getSocket(), new Error('close forced')));
           conn
             .commit()
             .then(() => {
@@ -209,9 +191,7 @@ describe('transaction', () => {
                 } else {
                   conn.query("INSERT INTO testTransaction2 values ('test')", (err) => {
                     process.nextTick(
-                      conn.__tests
-                        .getSocket()
-                        .destroy.bind(conn.__tests.getSocket(), new Error('close forced'))
+                      conn.__tests.getSocket().destroy.bind(conn.__tests.getSocket(), new Error('close forced'))
                     );
                     conn.commit();
                     done();
@@ -281,7 +261,8 @@ describe('transaction', () => {
       });
   });
 
-  it('transaction commit with callback', (done) => {
+  it('transaction commit with callback', function (done) {
+    this.timeout(5000);
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
       if (err) return done(err);

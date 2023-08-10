@@ -2,7 +2,6 @@
 
 const base = require('../base.js');
 const { assert } = require('chai');
-const moment = require('moment-timezone');
 
 describe('connection option', () => {
   it('with undefined collation', function (done) {
@@ -24,7 +23,7 @@ describe('connection option', () => {
         done(new Error('must have thrown error'));
       })
       .catch((err) => {
-        assert.isTrue(err.message.includes("Unknown IANA timezone 'unknown'"));
+        assert.isTrue(err.message.includes("setting timezone 'unknown' fails on server."));
         assert.equal(err.errno, 45033);
         assert.equal(err.sqlState, '08S01');
         assert.equal(err.code, 'ER_WRONG_IANA_TIMEZONE');
@@ -32,180 +31,104 @@ describe('connection option', () => {
       });
   });
 
-  it('automatic timezone', function (done) {
-    let mustFail = true;
-    shareConn
-      .query('SELECT @@system_time_zone stz, @@time_zone tz')
-      .then((res) => {
-        const serverTimezone = res[0].tz === 'SYSTEM' ? res[0].stz : res[0].tz;
-        const serverZone = moment.tz.zone(serverTimezone);
-        if (serverZone) {
-          mustFail = false;
-        }
+  it('ensure Etc/GMT', async function () {
+    let conn = await base.createConnection({ timezone: 'Etc/GMT-8', debug: true });
+    let res = await conn.query('SELECT @@time_zone as t');
+    assert.equal(res[0].t, '+08:00');
+    conn.end();
 
-        base
-          .createConnection({ timezone: 'auto' })
-          .then((conn) => {
-            conn.end();
-            if (mustFail) {
-              done(new Error('must have thrown error'));
-            } else {
-              done();
-            }
-          })
-          .catch((err) => {
-            if (mustFail) {
-              assert.isTrue(err.message.includes('Automatic timezone setting fails'));
-              assert.equal(err.errno, 45036);
-              assert.equal(err.sqlState, '08S01');
-              assert.equal(err.code, 'ER_WRONG_AUTO_TIMEZONE');
-              done();
-            } else {
-              done(new Error('must have thrown error'));
-            }
-          });
-      })
-      .catch(done);
+    conn = await base.createConnection({ timezone: 'GMT-8', debug: true });
+    res = await conn.query('SELECT @@time_zone as t');
+    assert.equal(res[0].t, '-08:00');
+    conn.end();
   });
 
-  it('timezone Z', function (done) {
-    base
-      .createConnection({ timezone: 'Z' })
-      .then((conn) => {
-        conn.query("SET SESSION time_zone = '+01:00'");
-        conn
-          .query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')])
-          .then((res) => {
-            // = 1999-12-31T23:00:00.000Z
-            assert.deepEqual(res[0].tt, 946681200);
-            return conn.query(
-              "SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2",
-              [new Date('2000-01-01T00:00:00Z')]
-            );
-          })
-          .then((res) => {
-            assert.deepEqual(res[0].tt1, new Date('2003-12-31T13:00:00+01:00'));
-            assert.deepEqual(res[0].tt2, new Date('2000-01-01T01:00:00+01:00'));
-            return conn.end();
-          })
-          .then(() => {
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('automatic timezone', async function () {
+    const conn = await base.createConnection({ timezone: 'auto' });
+    conn.end();
   });
 
-  it('timezone +0h', function (done) {
-    base
-      .createConnection({ timezone: '+00:00' })
-      .then((conn) => {
-        let d = new Date('2000-01-01T00:00:00Z');
-        conn
-          .query('SELECT UNIX_TIMESTAMP(?) tt', [d])
-          .then((res) => {
-            assert.deepEqual(res[0].tt, d.getTime() / 1000);
-            return conn.query(
-              "SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2",
-              [d]
-            );
-          })
-          .then((res) => {
-            assert.deepEqual(res[0].tt1, new Date('2003-12-31T12:00:00Z'));
-            assert.deepEqual(res[0].tt2, d);
-            return conn.end();
-          })
-          .then(() => {
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('timezone Z', async function () {
+    // node.js before v13 doesn't permit to set TZ value repeatedly
+    if (parseInt(process.versions.node.split('.')[0]) <= 12) this.skip();
+
+    const defaultTz = process.env.TZ;
+    const conn = await base.createConnection({ timezone: 'Z' });
+    conn.query("SET SESSION time_zone = '+01:00'");
+    process.env.TZ = 'Etc/GMT-1';
+    let res = await conn.query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')]);
+    // = 1999-12-31T23:00:00.000Z
+    assert.deepEqual(Number(res[0].tt), 946684800);
+    res = await conn.query("SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2", [
+      new Date('2000-01-01T00:00:00Z')
+    ]);
+    assert.deepEqual(res[0].tt1.toISOString(), '2003-12-31T11:00:00.000Z');
+    assert.deepEqual(res[0].tt2.toISOString(), '2000-01-01T00:00:00.000Z');
+    conn.end();
+    process.env.TZ = defaultTz;
   });
 
-  it('timezone +2h', function (done) {
-    base
-      .createConnection({ timezone: '+02' })
-      .then((conn) => {
-        conn.query("SET SESSION time_zone = '+01:00'");
-        conn
-          .query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')])
-          .then((res) => {
-            assert.deepEqual(res[0].tt, 946688400);
-            return conn.query(
-              "SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2",
-              [new Date('2000-01-01T00:00:00Z')]
-            );
-          })
-          .then((res) => {
-            assert.deepEqual(res[0].tt1, new Date('2003-12-31T11:00:00+01:00'));
-            assert.deepEqual(res[0].tt2, new Date('2000-01-01T01:00:00+01:00'));
-            return conn.end();
-          })
-          .then(() => {
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('timezone +0h', async function () {
+    const conn = await base.createConnection({ timezone: '+00:00', debug: true });
+
+    let d = new Date('2000-01-01T00:00:00Z');
+    let res = await conn.query("SELECT UNIX_TIMESTAMP('2000-01-01T00:00:00') tt", [d]);
+    assert.equal(Number(res[0].tt), d.getTime() / 1000);
+    conn.end();
   });
 
-  it('timezone +2h00', function (done) {
-    base
-      .createConnection({ timezone: '+02:00' })
-      .then((conn) => {
-        conn.query("SET SESSION time_zone = '+01:00'");
-        conn
-          .query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')])
-          .then((res) => {
-            //946688400 => 2000-01-01T01:00:00.000Z
-            assert.deepEqual(res[0].tt, 946688400);
-            return conn.end();
-          })
-          .then(() => {
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('timezone +10h00', async function () {
+    // node.js before v13 doesn't permit to set TZ value repeatedly
+    if (parseInt(process.versions.node.split('.')[0]) <= 12) this.skip();
+
+    const defaultTz = process.env.TZ;
+    const conn = await base.createConnection({ timezone: '+10:00' });
+    process.env.TZ = 'Etc/GMT-10';
+    let res = await conn.query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')]);
+    assert.deepEqual(Number(res[0].tt), 946684800);
+    res = await conn.query("SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2", [
+      new Date('2000-01-01T00:00:00Z')
+    ]);
+    assert.deepEqual(res[0].tt1.toISOString(), '2003-12-31T02:00:00.000Z');
+    assert.deepEqual(res[0].tt2.toISOString(), '2000-01-01T00:00:00.000Z');
+    conn.end();
+    process.env.TZ = defaultTz;
   });
 
-  it('timezone +1h', function (done) {
-    base
-      .createConnection({ timezone: '+01:00' })
-      .then((conn) => {
-        conn.query("SET SESSION time_zone = '+01:00'");
-        conn
-          .query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00+0100')])
-          .then((res) => {
-            assert.deepEqual(res[0].tt, 946681200);
-            return conn.end();
-          })
-          .then(() => {
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('timezone Etc/GMT-10', async function () {
+    // node.js before v13 doesn't permit to set TZ value repeatedly
+    if (parseInt(process.versions.node.split('.')[0]) <= 12) this.skip();
+
+    const defaultTz = process.env.TZ;
+    const conn = await base.createConnection({ timezone: 'Etc/GMT-10' });
+    process.env.TZ = 'Etc/GMT-10';
+    let res = await conn.query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')]);
+    assert.deepEqual(Number(res[0].tt), 946684800);
+    res = await conn.query("SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2", [
+      new Date('2000-01-01T00:00:00Z')
+    ]);
+    assert.deepEqual(res[0].tt1.toISOString(), '2003-12-31T02:00:00.000Z');
+    assert.deepEqual(res[0].tt2.toISOString(), '2000-01-01T00:00:00.000Z');
+    conn.end();
+    process.env.TZ = defaultTz;
   });
 
-  it('timezone -1h', function (done) {
-    base
-      .createConnection({ timezone: '-01:00' })
-      .then((conn) => {
-        conn.query("SET SESSION time_zone = '-01:00'");
-        conn
-          .query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00+0100')])
-          .then((res) => {
-            assert.deepEqual(res[0].tt, 946681200);
-            return conn.end();
-          })
-          .then(() => {
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('timezone GMT+10', async function () {
+    // node.js before v13 doesn't permit to set TZ value repeatedly
+    if (parseInt(process.versions.node.split('.')[0]) <= 12) this.skip();
+
+    const defaultTz = process.env.TZ;
+    const conn = await base.createConnection({ timezone: 'GMT+10' });
+    process.env.TZ = 'Etc/GMT-10';
+    let res = await conn.query('SELECT UNIX_TIMESTAMP(?) tt', [new Date('2000-01-01T00:00:00Z')]);
+    assert.deepEqual(Number(res[0].tt), 946684800);
+    res = await conn.query("SELECT TIMESTAMP('2003-12-31 12:00:00') tt1, FROM_UNIXTIME(UNIX_TIMESTAMP(?)) tt2", [
+      new Date('2000-01-01T00:00:00Z')
+    ]);
+    assert.deepEqual(res[0].tt1.toISOString(), '2003-12-31T02:00:00.000Z');
+    assert.deepEqual(res[0].tt2.toISOString(), '2000-01-01T00:00:00.000Z');
+    conn.end();
+    process.env.TZ = defaultTz;
   });
 
   it('wrong timezone format', function (done) {
@@ -215,7 +138,7 @@ describe('connection option', () => {
         done(new Error('Must have thrown exception'));
       })
       .catch((err) => {
-        assert.isTrue(err.message.includes("Unknown IANA timezone '+e:00'"));
+        assert.isTrue(err.message.includes("setting timezone '+e:00' fails on server"));
         assert.equal(err.errno, 45033);
         assert.equal(err.sqlState, '08S01');
         assert.equal(err.code, 'ER_WRONG_IANA_TIMEZONE');
@@ -223,41 +146,17 @@ describe('connection option', () => {
       });
   });
 
-  it('IANA local tz', function (done) {
-    const localTz = moment.tz.guess();
-    base
-      .createConnection({ timezone: localTz })
-      .then((conn) => {
-        conn.end();
-        done();
-      })
-      .catch(done);
-  });
-
-  it('IANA tz links', function (done) {
-    moment.tz.link(moment.tz.guess() + '|myLink');
-    base
-      .createConnection({ timezone: 'myLink' })
-      .then((conn) => {
-        conn.end();
-        done();
-      })
-      .catch(done);
-  });
-
   it('Server with different tz', async function () {
-    if (
-      process.env.srv === 'maxscale' ||
-      process.env.srv === 'skysql' ||
-      process.env.srv === 'skysql-ha'
-    )
-      this.skip();
+    // node.js before v13 doesn't permit to set TZ value repeatedly
+    if (parseInt(process.versions.node.split('.')[0]) <= 12) this.skip();
+
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     //MySQL 5.5 doesn't have milliseconds
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
-
+    const defaultTz = process.env.TZ;
     const conn = await base.createConnection({ timezone: 'Etc/GMT+5' });
+    process.env.TZ = 'Etc/GMT+5';
     const now = new Date();
-    conn.query("SET SESSION time_zone = '-05:00'");
     conn.query('DROP TABLE IF EXISTS t1');
     conn.query('CREATE TABLE t1 (a timestamp(6))');
     await conn.query('FLUSH TABLES');
@@ -266,6 +165,7 @@ describe('connection option', () => {
     assert.deepEqual(res[0].a, now);
     assert.isOk(Math.abs(res[0].b.getTime() - now.getTime()) < 5000);
     conn.end();
+    process.env.TZ = defaultTz;
   });
 
   it('nestTables results boolean', async function () {
@@ -381,9 +281,9 @@ describe('connection option', () => {
       .createConnection({ forceVersionCheck: true })
       .then((conn) => {
         conn
-          .query('SELECT 1')
+          .query("SELECT '1'")
           .then((rows) => {
-            assert.deepEqual(rows, [{ 1: 1 }]);
+            assert.deepEqual(rows, [{ 1: '1' }]);
             conn.end();
             done();
           })
@@ -425,9 +325,7 @@ describe('connection option', () => {
         })
         .catch((err) => {
           assert.isTrue(
-            err.message.includes(
-              'Can only use queryTimeout for MariaDB server after 10.1.1. queryTimeout value:'
-            )
+            err.message.includes('Can only use queryTimeout for MariaDB server after 10.1.1. queryTimeout value:')
           );
           assert.equal(err.errno, 45038);
           assert.equal(err.sqlState, 'HY000');
@@ -440,27 +338,56 @@ describe('connection option', () => {
   it('connection timeout superseded', function (done) {
     if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     this.timeout(10000);
-    if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 2)) this.skip();
-    base
-      .createConnection({ multipleStatements: true, queryTimeout: 10000000 })
-      .then((conn) => {
-        conn
-          .query({
-            timeout: 1000,
-            sql: 'SELECT 1;select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
-          })
-          .then(() => {
-            conn.end();
-            done(new Error('must have thrown error'));
-          })
-          .catch((err) => {
-            assert.equal(err.errno, 1969);
-            assert.equal(err.sqlState, '70100');
-            assert.equal(err.code, 'ER_STATEMENT_TIMEOUT');
-            conn.end();
-            done();
-          });
-      })
-      .catch(done);
+
+    if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 2)) {
+      // not supported
+      base
+        .createConnection({ multipleStatements: true })
+        .then((conn) => {
+          conn
+            .query({
+              timeout: 1000,
+              sql: 'SELECT 1;select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
+            })
+            .then(() => {
+              conn.end();
+              done(new Error('must have thrown error'));
+            })
+            .catch((err) => {
+              assert.isTrue(
+                err.message.includes('Cannot use timeout for MySQL server') ||
+                  err.message.includes('Cannot use timeout for xpand/MariaDB')
+              );
+              assert.equal(err.errno, 45038);
+              assert.equal(err.sqlState, 'HY000');
+              assert.equal(err.code, 'ER_TIMEOUT_NOT_SUPPORTED');
+              conn.end();
+              done();
+            });
+        })
+        .catch(done);
+    } else {
+      base
+        .createConnection({ multipleStatements: true, queryTimeout: 10000000 })
+        .then((conn) => {
+          conn
+            .query({
+              timeout: 1000,
+              sql: 'SELECT 1;select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
+            })
+            .then(() => {
+              conn.end();
+              done(new Error('must have thrown error'));
+            })
+            .catch((err) => {
+              assert.equal(err.errno, 1969);
+              assert.equal(err.sqlState, '70100');
+              assert.equal(err.code, 'ER_STATEMENT_TIMEOUT');
+              conn.end();
+              done();
+            });
+        })
+        .catch(done);
+    }
   });
 });

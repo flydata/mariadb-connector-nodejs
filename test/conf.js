@@ -4,7 +4,7 @@ let baseConfig = {
   user: 'root',
   database: 'testn',
   host: 'localhost',
-  connectTimeout: 1000,
+  connectTimeout: 2000,
   port: 3306
 };
 
@@ -21,5 +21,6 @@ if (process.env.TEST_DEBUG_LEN) baseConfig['debugLen'] = process.env.TEST_DEBUG_
 if (process.env.TEST_COLLATION) baseConfig['collation'] = process.env.TEST_COLLATION;
 if (process.env.TEST_LOG_PACKETS) baseConfig['logPackets'] = true;
 if (process.env.TEST_BULK) baseConfig['bulk'] = process.env.TEST_BULK;
+if (process.env.srv === 'xpand') baseConfig['initSql'] = 'SET NAMES UTF8';
 
 module.exports.baseConfig = baseConfig;

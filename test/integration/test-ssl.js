@@ -5,6 +5,7 @@ const { assert } = require('chai');
 const fs = require('fs');
 const Conf = require('../conf');
 const tls = require('tls');
+const { isXpand } = require('../base');
 
 describe('ssl', function () {
   let ca = Conf.baseConfig.ssl && Conf.baseConfig.ssl.ca ? Conf.baseConfig.ssl.ca : null;
@@ -15,12 +16,11 @@ describe('ssl', function () {
   let sslPort = Conf.baseConfig.port;
 
   before(function (done) {
+    if (isXpand()) this.skip();
     if (process.env.TEST_MAXSCALE_TLS_PORT) sslPort = parseInt(process.env.TEST_MAXSCALE_TLS_PORT);
     if (
       tls.DEFAULT_MIN_VERSION === 'TLSv1.2' &&
-      ((process.platform === 'win32' &&
-        shareConn.info.isMariaDB() &&
-        !shareConn.info.hasMinVersion(10, 4, 0)) ||
+      ((process.platform === 'win32' && shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(10, 4, 0)) ||
         (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(8, 0, 0)))
     ) {
       //TLSv1.2 is supported on windows only since MariaDB 10.4
@@ -34,16 +34,12 @@ describe('ssl', function () {
       }
     }
 
-    let serverCaFile =
-      Conf.baseConfig.ssl && Conf.baseConfig.ssl.ca ? null : process.env.TEST_DB_SERVER_CERT;
+    let serverCaFile = Conf.baseConfig.ssl && Conf.baseConfig.ssl.ca ? null : process.env.TEST_DB_SERVER_CERT;
     let clientKeyFileName = process.env.TEST_DB_CLIENT_KEY;
     let clientCertFileName = process.env.TEST_DB_CLIENT_CERT;
     let clientKeystoreFileName = process.env.TEST_DB_CLIENT_PKCS;
 
-    if (
-      !serverCaFile &&
-      (Conf.baseConfig.host === 'localhost' || Conf.baseConfig.host === 'mariadb.example.com')
-    ) {
+    if (!serverCaFile && (Conf.baseConfig.host === 'localhost' || Conf.baseConfig.host === 'mariadb.example.com')) {
       try {
         if (fs.existsSync('../../ssl')) {
           serverCaFile = '../../ssl/server.crt';
@@ -61,20 +57,16 @@ describe('ssl', function () {
     if (clientCertFileName) clientCert = [fs.readFileSync(clientCertFileName, 'utf8')];
     if (clientKeystoreFileName) clientKeystore = [fs.readFileSync(clientKeystoreFileName)];
 
+    shareConn.query("DROP USER 'sslTestUser'@'%'").catch((e) => {});
+    shareConn.query("DROP USER 'X509testUser'@'%'").catch((e) => {});
     shareConn
-      .query("DROP USER IF EXISTS 'sslTestUser'@'%'")
-      .then(() => {
-        return shareConn.query("DROP USER IF EXISTS 'X509testUser'@'%'");
-      })
-      .then(() => {
-        return shareConn.query(
-          "CREATE USER 'sslTestUser'@'%' IDENTIFIED BY 'ytoKS@ç%ùed5' " +
-            ((shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(10, 2, 0)) ||
-            (!shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(5, 7, 0))
-              ? ' REQUIRE SSL'
-              : '')
-        );
-      })
+      .query(
+        "CREATE USER 'sslTestUser'@'%' IDENTIFIED BY 'ytoKS@ç%ùed5' " +
+          ((shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(10, 2, 0)) ||
+          (!shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(5, 7, 0))
+            ? ' REQUIRE SSL'
+            : '')
+      )
       .then(() => {
         return shareConn.query(
           "GRANT SELECT ON *.* TO 'sslTestUser'@'%' " +
@@ -125,7 +117,7 @@ describe('ssl', function () {
         return shareConn.query("SHOW VARIABLES LIKE 'have_ssl'");
       })
       .then((rows) => {
-        if (rows[0].Value === 'YES') {
+        if (rows.length > 0 && rows[0].Value === 'YES') {
           sslEnable = true;
           done();
         } else {
@@ -145,23 +137,43 @@ describe('ssl', function () {
       .catch(done);
   });
 
-  it('signed certificate error ', function (done) {
+  it('error when server ssl is disable', async function () {
+    if (sslEnable || process.env.srv === 'skysql-ha') {
+      this.skip();
+      return;
+    }
+    try {
+      await base.createConnection({
+        ssl: { rejectUnauthorized: false },
+        port: sslPort
+      });
+      throw new Error('Must have thrown an exception !');
+    } catch (err) {
+      assert.equal(err.errno, 45023);
+      assert.equal(err.code, 'ER_SERVER_SSL_DISABLED');
+    }
+  });
+
+  it('signed certificate error', async function () {
     if (!sslEnable) this.skip();
-    base
-      .createConnection({
+    try {
+      const conn = await base.createConnection({
         user: 'sslTestUser',
         password: 'ytoKS@ç%ùed5',
         ssl: true,
         port: sslPort
-      })
-      .then((conn) => {
-        conn.end();
-        done(new Error('Must have thrown an exception !'));
-      })
-      .catch((err) => {
-        assert(err.message.includes('self signed certificate'));
-        done();
       });
+      conn.end();
+      throw new Error('Must have thrown an exception !');
+    } catch (err) {
+      assert(
+        err.message.includes('self signed certificate') ||
+          err.message.includes('self-signed certificate') ||
+          err.message.includes('unable to get local issuer certificate') ||
+          err.message.includes('unable to verify the first certificate'),
+        err.message
+      );
+    }
   });
 
   it('signed certificate forcing', function (done) {
@@ -363,9 +375,7 @@ describe('ssl', function () {
         done(new Error('Must have thrown an exception !'));
       })
       .catch((err) => {
-        assert(
-          err.message.includes('no ciphers available') || err.message.includes('no cipher match')
-        );
+        assert(err.message.includes('no ciphers available') || err.message.includes('no cipher match'));
         done();
       });
   });
@@ -458,18 +468,14 @@ describe('ssl', function () {
             err.message.includes("Hostname/IP does not match certificate's altnames"),
           'error was : ' + err.message
         );
-        assert(
-          err.message.includes("IP: 127.0.0.1 is not in the cert's list"),
-          'error was : ' + err.message
-        );
+        assert(err.message.includes("IP: 127.0.0.1 is not in the cert's list"), 'error was : ' + err.message);
 
         done();
       });
   });
 
   it('CA provided with matching cn', function (done) {
-    if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com')
-      this.skip();
+    if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com') this.skip();
     if (!sslEnable) this.skip();
     if (!ca) this.skip();
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 7, 10)) this.skip();
@@ -549,6 +555,10 @@ describe('ssl', function () {
     if (!ca || !clientKeystore) this.skip();
     if (!base.utf8Collation()) this.skip();
 
+    const ver = process.version.substring(1).split('.');
+    //on node.js 17+ client keystore won't be supported until installing openssl 3.0
+    if (parseInt(ver[0]) >= 17) this.skip();
+
     base
       .createConnection({
         user: 'X509testUser',
@@ -581,7 +591,7 @@ describe('ssl', function () {
       })
       .then((con) => {
         conn = con;
-        conn.query("DROP USER IF EXISTS ChangeUser@'%'").catch((err) => {});
+        conn.query("DROP USER ChangeUser@'%'").catch((err) => {});
         conn.query('FLUSH PRIVILEGES');
         conn.query("CREATE USER ChangeUser@'%' IDENTIFIED BY 'mySupPassw@rd2'");
         conn.query("GRANT SELECT ON *.* TO ChangeUser@'%' with grant option");

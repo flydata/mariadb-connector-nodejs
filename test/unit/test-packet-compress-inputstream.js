@@ -14,7 +14,7 @@ const ZLib = require('zlib');
 describe('test compress PacketInputStream data', () => {
   let bigSize = 20 * 1024 * 1024 - 1;
   let buf;
-  const info = new ConnectionInformation();
+  const info = new ConnectionInformation({});
   const unexpectedPacket = (packet) => {
     throw new Error('unexpected packet');
   };
@@ -105,7 +105,7 @@ describe('test compress PacketInputStream data', () => {
     const queue = new Queue();
     queue.push(
       new EmptyCmd((packet) => {
-        assert.deepEqual(expectedBuf, packet.buf);
+        assert.deepEqual(expectedBuf, packet.buf.slice(packet.pos, packet.end));
         done();
       })
     );

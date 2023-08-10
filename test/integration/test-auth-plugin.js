@@ -3,6 +3,9 @@
 const base = require('../base.js');
 const { assert } = require('chai');
 const Conf = require('../conf');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('authentication plugin', () => {
   let rsaPublicKey = process.env.TEST_RSA_PUBLIC_KEY;
@@ -29,16 +32,15 @@ describe('authentication plugin', () => {
       }
     }
 
-    await shareConn.query("DROP USER IF EXISTS 'sha256User'@'%'");
-    await shareConn.query("DROP USER IF EXISTS 'cachingSha256User'@'%'");
-    await shareConn.query("DROP USER IF EXISTS 'cachingSha256User2'@'%'");
-    await shareConn.query("DROP USER IF EXISTS 'cachingSha256User3'@'%'");
+    await shareConn.query("DROP USER 'sha256User'@'%'").catch((e) => {});
+    await shareConn.query("DROP USER 'cachingSha256User'@'%'").catch((e) => {});
+    await shareConn.query("DROP USER 'cachingSha256User2'@'%'").catch((e) => {});
+    await shareConn.query("DROP USER 'cachingSha256User3'@'%'").catch((e) => {});
+    await shareConn.query("DROP USER 'cachingSha256User4'@'%'").catch((e) => {});
 
     if (!shareConn.info.isMariaDB()) {
       if (shareConn.info.hasMinVersion(8, 0, 0)) {
-        await shareConn.query(
-          "CREATE USER 'sha256User'@'%' IDENTIFIED WITH sha256_password BY 'password'"
-        );
+        await shareConn.query("CREATE USER 'sha256User'@'%' IDENTIFIED WITH sha256_password BY 'password'");
         await shareConn.query("GRANT ALL PRIVILEGES ON *.* TO 'sha256User'@'%'");
 
         await shareConn.query(
@@ -53,87 +55,86 @@ describe('authentication plugin', () => {
           "CREATE USER 'cachingSha256User3'@'%'  IDENTIFIED WITH caching_sha2_password BY 'password'"
         );
         await shareConn.query("GRANT ALL PRIVILEGES ON *.* TO 'cachingSha256User3'@'%'");
+        await shareConn.query(
+          "CREATE USER 'cachingSha256User4'@'%'  IDENTIFIED WITH caching_sha2_password BY 'password'"
+        );
+        await shareConn.query("GRANT ALL PRIVILEGES ON *.* TO 'cachingSha256User4'@'%'");
       } else {
         await shareConn.query("CREATE USER 'sha256User'@'%'");
         await shareConn.query(
-          "GRANT ALL PRIVILEGES ON *.* TO 'sha256User'@'%' IDENTIFIED WITH " +
-            "sha256_password BY 'password'"
+          "GRANT ALL PRIVILEGES ON *.* TO 'sha256User'@'%' IDENTIFIED WITH " + "sha256_password BY 'password'"
         );
       }
     }
   });
 
-  it('ed25519 authentication plugin', function (done) {
+  it('ed25519 authentication plugin', async function () {
     if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
     const self = this;
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 22)) this.skip();
 
-    shareConn
-      .query('SELECT @@strict_password_validation as a')
-      .then((res) => {
-        if (res[0].a === 1 && !shareConn.info.hasMinVersion(10, 4, 0)) self.skip();
-        shareConn
-          .query("INSTALL SONAME 'auth_ed25519'")
-          .then(
-            () => {
-              shareConn
-                .query("drop user IF EXISTS verificationEd25519AuthPlugin@'%'")
-                .then(() => {
-                  if (shareConn.info.hasMinVersion(10, 4, 0)) {
-                    return shareConn.query(
-                      "CREATE USER verificationEd25519AuthPlugin@'%' IDENTIFIED " +
-                        "VIA ed25519 USING PASSWORD('MySup8%rPassw@ord')"
-                    );
-                  }
-                  return shareConn.query(
-                    "CREATE USER verificationEd25519AuthPlugin@'%' IDENTIFIED " +
-                      "VIA ed25519 USING '6aW9C7ENlasUfymtfMvMZZtnkCVlcb1ssxOLJ0kj/AA'"
-                  );
-                })
-                .then(() => {
-                  return shareConn.query(
-                    'GRANT SELECT on  `' +
-                      Conf.baseConfig.database +
-                      "`.* to verificationEd25519AuthPlugin@'%'"
-                  );
-                })
-                .then(() => {
-                  base
-                    .createConnection({
-                      user: 'verificationEd25519AuthPlugin',
-                      password: 'MySup8%rPassw@ord'
-                    })
-                    .then((conn) => {
-                      conn.end();
-                      done();
-                    })
-                    .catch(done);
-                })
-                .catch((err) => {
-                  const expectedMsg = err.message.includes(
-                    "Client does not support authentication protocol 'client_ed25519' requested by server."
-                  );
-                  if (!expectedMsg) console.log(err);
-                  assert(expectedMsg);
-                  done();
-                });
-            },
-            (err) => {
-              //server wasn't build with this plugin, cancelling test
-              self.skip();
-            }
-          )
-          .catch(done);
-      })
-      .catch(done);
+    const res = await shareConn.query('SELECT @@strict_password_validation as a');
+    if (res[0].a === 1 && !shareConn.info.hasMinVersion(10, 4, 0)) self.skip();
+    try {
+      await shareConn.query("INSTALL SONAME 'auth_ed25519'");
+      await shareConn.query("drop user IF EXISTS verificationEd25519AuthPlugin@'%'");
+      if (shareConn.info.hasMinVersion(10, 4, 0)) {
+        await shareConn.query(
+          "CREATE USER verificationEd25519AuthPlugin@'%' IDENTIFIED " +
+            "VIA ed25519 USING PASSWORD('MySup8%rPassw@ord')"
+        );
+      } else {
+        await shareConn.query(
+          "CREATE USER verificationEd25519AuthPlugin@'%' IDENTIFIED " +
+            "VIA ed25519 USING '6aW9C7ENlasUfymtfMvMZZtnkCVlcb1ssxOLJ0kj/AA'"
+        );
+      }
+      await shareConn.query(
+        'GRANT SELECT on  `' + Conf.baseConfig.database + "`.* to verificationEd25519AuthPlugin@'%'"
+      );
+    } catch (e) {
+      this.skip();
+    }
+
+    try {
+      let conn = await base.createConnection({
+        user: 'verificationEd25519AuthPlugin',
+        password: 'MySup8%rPassw@ord'
+      });
+      await conn.changeUser({
+        user: 'verificationEd25519AuthPlugin',
+        password: 'MySup8%rPassw@ord'
+      });
+      conn.end();
+      try {
+        conn = await base.createConnection({
+          user: 'verificationEd25519AuthPlugin',
+          password: 'MySup8%rPassw@ord',
+          restrictedAuth: ''
+        });
+        conn.end();
+        throw new Error('must have thrown error');
+      } catch (err) {
+        assert.equal(err.text, 'Unsupported authentication plugin client_ed25519. Authorized plugin: ');
+        assert.equal(err.errno, 45047);
+        assert.equal(err.sqlState, '42000');
+        assert.equal(err.code, 'ER_NOT_SUPPORTED_AUTH_PLUGIN');
+        assert.isTrue(err.fatal);
+      }
+    } catch (err) {
+      const expectedMsg = err.message.includes(
+        "Client does not support authentication protocol 'client_ed25519' requested by server."
+      );
+      if (!expectedMsg) console.log(err);
+      assert(expectedMsg);
+    }
   });
 
   it('name pipe authentication plugin', function (done) {
     if (process.platform !== 'win32') this.skip();
     if (process.env.srv === 'maxscale') this.skip();
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 11)) this.skip();
-    if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com')
-      this.skip();
+    if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com') this.skip();
     const windowsUser = process.env.USERNAME;
     if (windowsUser === 'root') this.skip();
 
@@ -181,8 +182,7 @@ describe('authentication plugin', () => {
     if (process.platform === 'win32') this.skip();
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 11)) this.skip();
     if (!process.env.LOCAL_SOCKET_AVAILABLE) this.skip();
-    if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com')
-      this.skip();
+    if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com') this.skip();
 
     shareConn
       .query('select @@version_compile_os,@@socket soc')
@@ -193,13 +193,7 @@ describe('authentication plugin', () => {
         shareConn.query("INSTALL PLUGIN unix_socket SONAME 'auth_socket'").catch((err) => {});
         shareConn.query('DROP USER IF EXISTS ' + unixUser);
         shareConn
-          .query(
-            "CREATE USER '" +
-              unixUser +
-              "'@'" +
-              Conf.baseConfig.host +
-              "' IDENTIFIED VIA unix_socket"
-          )
+          .query("CREATE USER '" + unixUser + "'@'" + Conf.baseConfig.host + "' IDENTIFIED VIA unix_socket")
           .catch((err) => {});
         shareConn
           .query("GRANT SELECT on *.* to '" + unixUser + "'@'" + Conf.baseConfig.host + "'")
@@ -232,19 +226,20 @@ describe('authentication plugin', () => {
       await shareConn.query("DROP USER IF EXISTS '" + process.env.TEST_PAM_USER + "'@'%'");
     } catch (error) {}
 
-    await shareConn.query(
-      "CREATE USER '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam USING 'mariadb'"
-    );
-    await shareConn.query(
-      "GRANT SELECT ON *.* TO '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam"
-    );
+    await shareConn.query("CREATE USER '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam USING 'mariadb'");
+    await shareConn.query("GRANT SELECT ON *.* TO '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam");
     await shareConn.query('FLUSH PRIVILEGES');
 
+    let testPort = Conf.baseConfig.port;
+    if (process.env.TEST_PAM_PORT != null) {
+      testPort = parseInt(process.env.TEST_PAM_PORT);
+    }
     //password is unix password "myPwd"
     try {
       const conn = await base.createConnection({
         user: process.env.TEST_PAM_USER,
-        password: process.env.TEST_PAM_PWD
+        password: process.env.TEST_PAM_PWD,
+        port: testPort
       });
       await conn.end();
     } catch (err) {
@@ -266,20 +261,20 @@ describe('authentication plugin', () => {
     try {
       await shareConn.query("DROP USER IF EXISTS '" + process.env.TEST_PAM_USER + "'@'%'");
     } catch (error) {}
-    await shareConn.query(
-      "CREATE USER '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam USING 'mariadb'"
-    );
-    await shareConn.query(
-      "GRANT SELECT ON *.* TO '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam"
-    );
+    await shareConn.query("CREATE USER '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam USING 'mariadb'");
+    await shareConn.query("GRANT SELECT ON *.* TO '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam");
     await shareConn.query('FLUSH PRIVILEGES');
 
-    //password is unix password "myPwd"
+    let testPort = Conf.baseConfig.port;
+    if (process.env.TEST_PAM_PORT != null) {
+      testPort = parseInt(process.env.TEST_PAM_PORT);
+    }
     //password is unix password "myPwd"
     try {
       const conn = await base.createConnection({
         user: process.env.TEST_PAM_USER,
-        password: [process.env.TEST_PAM_PWD, process.env.TEST_PAM_PWD]
+        password: [process.env.TEST_PAM_PWD, process.env.TEST_PAM_PWD],
+        port: testPort
       });
       await conn.end();
     } catch (err) {
@@ -290,12 +285,7 @@ describe('authentication plugin', () => {
   });
 
   it('multi authentication plugin', function (done) {
-    if (
-      process.env.srv === 'maxscale' ||
-      process.env.srv === 'skysql' ||
-      process.env.srv === 'skysql-ha'
-    )
-      this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 4, 3)) this.skip();
     shareConn.query("drop user IF EXISTS mysqltest1@'%'").catch((err) => {});
     shareConn
@@ -305,9 +295,7 @@ describe('authentication plugin', () => {
           " OR mysql_native_password as password('!Passw0rd3Works')"
       )
       .then(() => {
-        return shareConn.query(
-          'grant SELECT on `' + Conf.baseConfig.database + "`.*  to mysqltest1@'%'"
-        );
+        return shareConn.query('grant SELECT on `' + Conf.baseConfig.database + "`.*  to mysqltest1@'%'");
       })
       .then(() => {
         return base.createConnection({
@@ -316,7 +304,7 @@ describe('authentication plugin', () => {
         });
       })
       .then((conn) => {
-        return conn.query('select 1').then((res) => {
+        return conn.query("select '1'").then((res) => {
           return conn.end();
         });
       })
@@ -329,7 +317,7 @@ describe('authentication plugin', () => {
           .then((conn) => {
             conn
               .query('select 1')
-              .then((res) => {
+              .then(() => {
                 conn.end();
                 base
                   .createConnection({
@@ -337,6 +325,7 @@ describe('authentication plugin', () => {
                     password: '!Passw0rd3Wrong'
                   })
                   .then((conn) => {
+                    conn.end();
                     done(new Error('must have throw Error!'));
                   })
                   .catch(() => {
@@ -350,31 +339,66 @@ describe('authentication plugin', () => {
       .catch(done);
   });
 
-  it('sha256 authentication plugin', function (done) {
-    if (process.platform === 'win32') this.skip();
-    if (!rsaPublicKey || shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(5, 7, 0))
-      this.skip();
+  it('sha256 authentication plugin', async function () {
+    if (!rsaPublicKey || shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(5, 7, 0)) this.skip();
 
     const self = this;
-    base
-      .createConnection({
+    try {
+      const conn = await base.createConnection({
         user: 'sha256User',
         password: 'password',
         rsaPublicKey: rsaPublicKey
-      })
-      .then((conn) => {
-        conn.end();
-        done();
-      })
-      .catch((err) => {
-        if (err.message.includes('sha256_password authentication plugin require node 11.6+'))
-          self.skip();
-        done(err);
       });
+      conn.end();
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      throw err;
+    }
+
+    try {
+      const conn = await base.createConnection({
+        user: 'sha256User',
+        password: 'password',
+        rsaPublicKey: '/wrongPath'
+      });
+      conn.end();
+      throw new Error('must have thrown exception');
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      assert.isTrue(err.message.includes('/wrongPath'));
+    }
+
+    const filePath = path.join(os.tmpdir(), 'RSA_tmp_file.txt');
+    fs.writeFileSync(filePath, rsaPublicKey);
+    try {
+      const conn = await base.createConnection({
+        user: 'sha256User',
+        password: 'password',
+        rsaPublicKey: filePath
+      });
+      conn.end();
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      throw err;
+    }
+    try {
+      fs.unlinkSync(filePath);
+    } catch (e) {}
+
+    try {
+      const conn = await base.createConnection({
+        user: 'sha256User',
+        rsaPublicKey: rsaPublicKey
+      });
+      conn.end();
+      throw new Error('must have thrown exception');
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      assert.isTrue(err.message.includes('Access denied'));
+    }
   });
 
   it('sha256 authentication plugin with public key retrieval', function (done) {
-    if (process.platform === 'win32') this.skip();
     if (shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(5, 7, 0)) this.skip();
 
     const self = this;
@@ -389,8 +413,7 @@ describe('authentication plugin', () => {
         done();
       })
       .catch((err) => {
-        if (err.message.includes('sha256_password authentication plugin require node 11.6+'))
-          self.skip();
+        if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
         done(err);
       });
   });
@@ -438,8 +461,7 @@ describe('authentication plugin', () => {
               done();
             })
             .catch((err) => {
-              if (err.message.includes('sha256_password authentication plugin require node 11.6+'))
-                self.skip();
+              if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
               done(err);
             });
         } else {
@@ -449,60 +471,103 @@ describe('authentication plugin', () => {
       .catch(done);
   });
 
-  it('cachingsha256 authentication plugin', function (done) {
-    if (process.platform === 'win32') this.skip();
-    if (!rsaPublicKey || shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(8, 0, 0))
-      this.skip();
+  it('cachingsha256 authentication plugin', async function () {
+    if (!rsaPublicKey || shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(8, 0, 0)) this.skip();
 
     const self = this;
-    base
-      .createConnection({
+
+    try {
+      const conn = await base.createConnection({
+        user: 'cachingSha256User4',
+        password: 'password',
+        cachingRsaPublicKey: '/wrongPath'
+      });
+      conn.end();
+      throw new Error('must have thrown exception');
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      assert.isTrue(err.message.includes('/wrongPath'));
+    }
+
+    const filePath = path.join(os.tmpdir(), 'RSA_tmp_file.txt');
+    fs.writeFileSync(filePath, rsaPublicKey);
+    try {
+      const conn = await base.createConnection({
+        user: 'cachingSha256User4',
+        password: 'password',
+        cachingRsaPublicKey: filePath
+      });
+      conn.end();
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      throw err;
+    }
+    try {
+      fs.unlinkSync(filePath);
+    } catch (e) {}
+
+    try {
+      const conn = await base.createConnection({
+        user: 'cachingSha256User',
+        cachingRsaPublicKey: rsaPublicKey
+      });
+      conn.end();
+      throw new Error('must have thrown exception');
+    } catch (err) {
+      if (err.message.includes('sha256_password authentication plugin require node 11.6+')) self.skip();
+      assert.isTrue(err.message.includes('Access denied'));
+    }
+
+    try {
+      const conn = await base.createConnection({
         user: 'cachingSha256User',
         password: 'password',
         cachingRsaPublicKey: rsaPublicKey
-      })
-      .then((conn) => {
-        conn.end();
-        //using fast auth
-        base
-          .createConnection({
-            user: 'cachingSha256User',
-            password: 'password',
-            cachingRsaPublicKey: rsaPublicKey
-          })
-          .then((conn) => {
-            conn.end();
-            done();
-          })
-          .catch(done);
-      })
-      .catch((err) => {
-        if (err.message.includes('caching_sha2_password authentication plugin require node 11.6+'))
-          self.skip();
-        done(err);
       });
+      conn.end();
+    } catch (e) {
+      throw e;
+    }
+
+    try {
+      const conn = await base.createConnection({
+        user: 'cachingSha256User',
+        password: 'password',
+        cachingRsaPublicKey: rsaPublicKey
+      });
+      conn.end();
+    } catch (e) {
+      throw e;
+    }
   });
 
-  it('cachingsha256 authentication plugin with public key retrieval', function (done) {
-    if (process.platform === 'win32') this.skip();
+  it('cachingsha256 authentication plugin with public key retrieval', async function () {
     if (shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(8, 0, 0)) this.skip();
+    // request files since 5.7.40 / 8.0.31 fails when requesting public key
+    if (
+      !shareConn.info.isMariaDB() &&
+      ((!shareConn.info.hasMinVersion(8, 0, 0) && shareConn.info.hasMinVersion(5, 7, 40)) ||
+        shareConn.info.hasMinVersion(8, 0, 31))
+    )
+      this.skip();
 
     const self = this;
-    base
-      .createConnection({
+    try {
+      const conn = await base.createConnection({
         user: 'cachingSha256User2',
         password: 'password',
         allowPublicKeyRetrieval: true
-      })
-      .then((conn) => {
-        conn.end();
-        done();
-      })
-      .catch((err) => {
-        if (err.message.includes('caching_sha2_password authentication plugin require node 11.6+'))
-          self.skip();
-        done(err);
       });
+      conn.end();
+    } catch (err) {
+      if (err.message.includes('caching_sha2_password authentication plugin require node 11.6+')) self.skip();
+      throw err;
+    }
+    const conn = await base.createConnection({
+      user: 'cachingSha256User2',
+      password: 'password'
+    });
+    conn.end();
   });
 
   it('cachingsha256 authentication plugin without public key retrieval', function (done) {
@@ -548,12 +613,7 @@ describe('authentication plugin', () => {
               done();
             })
             .catch((err) => {
-              if (
-                err.message.includes(
-                  'caching_sha2_password authentication plugin require node 11.6+'
-                )
-              )
-                self.skip();
+              if (err.message.includes('caching_sha2_password authentication plugin require node 11.6+')) self.skip();
               done();
             });
         } else {

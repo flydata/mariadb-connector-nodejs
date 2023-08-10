@@ -5,6 +5,7 @@ const { assert } = require('chai');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { isXpand } = require('../base');
 
 describe('streaming', () => {
   const fileName = path.join(os.tmpdir(), 'tempBigFile.txt');
@@ -27,7 +28,7 @@ describe('streaming', () => {
         return shareConn.query('SELECT @@max_allowed_packet as t');
       })
       .then((rows) => {
-        maxAllowedSize = rows[0].t;
+        maxAllowedSize = Number(rows[0].t);
         createTmpFiles(done);
       })
       .catch(done);
@@ -85,12 +86,7 @@ describe('streaming', () => {
     const r2 = fs.createReadStream(halfFileName);
     await shareConn.query('truncate Streaming');
     await shareConn.beginTransaction();
-    await shareConn.query('insert into Streaming(b, c, d, e) values(?, ?, ?, ?)', [
-      r,
-      't1',
-      r2,
-      't2'
-    ]);
+    await shareConn.query('insert into Streaming(b, c, d, e) values(?, ?, ?, ?)', [r, 't1', r2, 't2']);
     const rows = await shareConn.query('SELECT * from Streaming');
     assert.equal(size / 2, rows[0].b.length);
     assert.equal(size / 2, rows[0].d.length);
@@ -104,12 +100,7 @@ describe('streaming', () => {
     const r2 = fs.createReadStream(halfFileName);
     await shareConn.query('truncate Streaming');
     await shareConn.beginTransaction();
-    await shareConn.query('insert into Streaming(c, b, e, d) values(?, ?, ?, ?)', [
-      't1',
-      r,
-      't2',
-      r2
-    ]);
+    await shareConn.query('insert into Streaming(c, b, e, d) values(?, ?, ?, ?)', ['t1', r, 't2', r2]);
     const rows = await shareConn.query('SELECT * from Streaming');
     assert.equal(size / 2, rows[0].b.length);
     assert.equal(size / 2, rows[0].d.length);
@@ -117,7 +108,9 @@ describe('streaming', () => {
   });
 
   it('Streaming multiple parameter ensure max callstack', async function () {
-    if (maxAllowedSize <= size) this.skip();
+    //xpand limite columns by max_columns
+    if (isXpand()) this.skip();
+    if (maxAllowedSize < size) this.skip();
     this.timeout(20000);
     const r = fs.createReadStream(halfFileName);
 

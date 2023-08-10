@@ -2,6 +2,7 @@
 
 const base = require('../base.js');
 const { assert } = require('chai');
+const { isXpand } = require('../base');
 
 describe('multi-results', () => {
   let multiStmtConn;
@@ -9,7 +10,7 @@ describe('multi-results', () => {
   before(function (done) {
     base
       .createConnection({ multipleStatements: true })
-      .then((con) => {
+      .then(async (con) => {
         multiStmtConn = con;
         done();
       })
@@ -25,12 +26,13 @@ describe('multi-results', () => {
   });
 
   it('simple do 1', function (done) {
+    if (isXpand()) this.skip();
     shareConn
       .query('DO 1')
       .then((rows) => {
         assert.deepEqual(rows, {
           affectedRows: 0,
-          insertId: 0,
+          insertId: 0n,
           warningStatus: 0
         });
         done();
@@ -115,6 +117,7 @@ describe('multi-results', () => {
   });
 
   it('simple do 1 with callback', function (done) {
+    if (isXpand()) this.skip();
     const callbackConn = base.createCallbackConnection();
     callbackConn.connect((err) => {
       if (err) {
@@ -126,7 +129,7 @@ describe('multi-results', () => {
           } else {
             assert.deepEqual(rows, {
               affectedRows: 0,
-              insertId: 0,
+              insertId: BigInt(0),
               warningStatus: 0
             });
             callbackConn.end();
@@ -143,11 +146,11 @@ describe('multi-results', () => {
       if (err) {
         done(err);
       } else {
-        callbackConn.query({ sql: 'SELECT 1, 2', rowsAsArray: true }, (err, rows) => {
+        callbackConn.query({ sql: "SELECT '1', '2'", rowsAsArray: true }, (err, rows) => {
           if (err) {
             done(err);
           } else {
-            assert.deepEqual(rows, [[1, 2]]);
+            assert.deepEqual(rows, [['1', '2']]);
             callbackConn.end();
             done();
           }
@@ -172,9 +175,9 @@ describe('multi-results', () => {
 
   it('simple select 1', function (done) {
     shareConn
-      .query('SELECT 1')
+      .query("SELECT '1'")
       .then((rows) => {
-        assert.deepEqual(rows, [{ 1: 1 }]);
+        assert.deepEqual(rows, [{ 1: '1' }]);
         done();
       })
       .catch(done);
@@ -182,9 +185,9 @@ describe('multi-results', () => {
 
   it('query using callback and promise mode', function (done) {
     shareConn
-      .query('select 1', (err, rows) => {})
+      .query("select '1'", (err, rows) => {})
       .then((rows) => {
-        assert.deepEqual(rows, [{ 1: 1 }]);
+        assert.deepEqual(rows, [{ 1: '1' }]);
         done();
       })
       .catch(done);
@@ -193,10 +196,10 @@ describe('multi-results', () => {
   it('query result with option metaPromiseAsArray', function (done) {
     base.createConnection({ metaAsArray: true }).then((conn) => {
       conn
-        .query('select 1')
+        .query("select '1'")
         .then((obj) => {
           assert.equal(obj.length, 2);
-          assert.deepEqual(obj[0], [{ 1: 1 }]);
+          assert.deepEqual(obj[0], [{ 1: '1' }]);
           conn.end();
           done();
         })
@@ -208,11 +211,11 @@ describe('multi-results', () => {
     if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     base.createConnection({ metaAsArray: true, multipleStatements: true }).then((conn) => {
       conn
-        .query('select 1; select 2')
+        .query("select '1'; select '2'")
         .then((obj) => {
           assert.equal(obj[0].length, 2);
           assert.equal(obj[1].length, 2);
-          assert.deepEqual(obj[0], [[{ 1: 1 }], [{ 2: 2 }]]);
+          assert.deepEqual(obj[0], [[{ 1: '1' }], [{ 2: '2' }]]);
           conn.end();
           done();
         })
@@ -226,11 +229,11 @@ describe('multi-results', () => {
       if (err) {
         done(err);
       } else {
-        callbackConn.query('SELECT 1', (err, rows) => {
+        callbackConn.query("SELECT '1'", (err, rows) => {
           if (err) {
             done(err);
           } else {
-            assert.deepEqual(rows, [{ 1: 1 }]);
+            assert.deepEqual(rows, [{ 1: '1' }]);
             callbackConn.end();
             done();
           }
@@ -242,12 +245,12 @@ describe('multi-results', () => {
   it('multiple selects', function (done) {
     if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     multiStmtConn
-      .query('SELECT 1 as t; SELECT 2 as t2; SELECT 3 as t3')
+      .query("SELECT '1' as t; SELECT '2' as t2; SELECT '3' as t3")
       .then((rows) => {
         assert.equal(rows.length, 3);
-        assert.deepEqual(rows[0], [{ t: 1 }]);
-        assert.deepEqual(rows[1], [{ t2: 2 }]);
-        assert.deepEqual(rows[2], [{ t3: 3 }]);
+        assert.deepEqual(rows[0], [{ t: '1' }]);
+        assert.deepEqual(rows[1], [{ t2: '2' }]);
+        assert.deepEqual(rows[2], [{ t3: '3' }]);
         done();
       })
       .catch(done);
@@ -262,14 +265,14 @@ describe('multi-results', () => {
       if (err) {
         done(err);
       } else {
-        callbackConn.query('SELECT 1 as t; SELECT 2 as t2; SELECT 3 as t3', (err, rows) => {
+        callbackConn.query("SELECT '1' as t; SELECT '2' as t2; SELECT '3' as t3", (err, rows) => {
           if (err) {
             done(err);
           } else {
             assert.equal(rows.length, 3);
-            assert.deepEqual(rows[0], [{ t: 1 }]);
-            assert.deepEqual(rows[1], [{ t2: 2 }]);
-            assert.deepEqual(rows[2], [{ t3: 3 }]);
+            assert.deepEqual(rows[0], [{ t: '1' }]);
+            assert.deepEqual(rows[1], [{ t2: '2' }]);
+            assert.deepEqual(rows[2], [{ t3: '3' }]);
             callbackConn.end();
             done();
           }
@@ -279,15 +282,15 @@ describe('multi-results', () => {
   });
 
   it('multiple result type', function (done) {
-    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     multiStmtConn
-      .query('SELECT 1 as t; DO 1')
+      .query("SELECT '1' as t; DO 1")
       .then((rows) => {
         assert.equal(rows.length, 2);
-        assert.deepEqual(rows[0], [{ t: 1 }]);
+        assert.deepEqual(rows[0], [{ t: '1' }]);
         assert.deepEqual(rows[1], {
           affectedRows: 0,
-          insertId: 0,
+          insertId: 0n,
           warningStatus: 0
         });
         done();
@@ -296,7 +299,7 @@ describe('multi-results', () => {
   });
 
   it('multiple result type with callback', function (done) {
-    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     const callbackConn = base.createCallbackConnection({
       multipleStatements: true
     });
@@ -304,15 +307,15 @@ describe('multi-results', () => {
       if (err) {
         done(err);
       } else {
-        callbackConn.query('SELECT 1 as t; DO 1', (err, rows) => {
+        callbackConn.query("SELECT '1' as t; DO 1", (err, rows) => {
           if (err) {
             done(err);
           } else {
             assert.equal(rows.length, 2);
-            assert.deepEqual(rows[0], [{ t: 1 }]);
+            assert.deepEqual(rows[0], [{ t: '1' }]);
             assert.deepEqual(rows[1], {
               affectedRows: 0,
-              insertId: 0,
+              insertId: 0n,
               warningStatus: 0
             });
             callbackConn.end();
@@ -323,38 +326,34 @@ describe('multi-results', () => {
     });
   });
 
-  it('multiple result type with multiple rows', function (done) {
+  it('multiple result type with multiple rows', async function () {
+    if (shareConn.serverVersion().includes('maxScale-6.2.0')) this.skip();
     if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     //using sequence engine
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1)) this.skip();
-    multiStmtConn
-      .query('select * from seq_1_to_2; DO 1;select * from seq_2_to_3')
-      .then((rows) => {
-        assert.equal(rows.length, 3);
-        assert.deepEqual(rows[0], [{ seq: 1 }, { seq: 2 }]);
-        assert.deepEqual(rows[1], {
-          affectedRows: 0,
-          insertId: 0,
-          warningStatus: 0
-        });
-        assert.deepEqual(rows[2], [{ seq: 2 }, { seq: 3 }]);
-        done();
-      })
-      .catch(done);
+    const rows = await multiStmtConn.query('select * from seq_1_to_2; DO 1;select * from seq_2_to_3');
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows[0], [{ seq: 1n }, { seq: 2n }]);
+    assert.deepEqual(rows[1], {
+      affectedRows: 0,
+      insertId: 0n,
+      warningStatus: 0
+    });
+    assert.deepEqual(rows[2], [{ seq: 2n }, { seq: 3n }]);
   });
 
   it('multiple result from procedure', function (done) {
-    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
-    shareConn.query('CREATE PROCEDURE myProc () BEGIN  SELECT 1; SELECT 2; END');
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    shareConn.query("CREATE PROCEDURE myProc () BEGIN  SELECT '1'; SELECT '2'; END");
     shareConn
       .query('call myProc()')
       .then((rows) => {
         assert.equal(rows.length, 3);
-        assert.deepEqual(rows[0], [{ 1: 1 }]);
-        assert.deepEqual(rows[1], [{ 2: 2 }]);
+        assert.deepEqual(rows[0], [{ 1: '1' }]);
+        assert.deepEqual(rows[1], [{ 2: '2' }]);
         assert.deepEqual(rows[2], {
           affectedRows: 0,
-          insertId: 0,
+          insertId: 0n,
           warningStatus: 0
         });
         done();

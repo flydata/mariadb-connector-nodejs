@@ -8,28 +8,31 @@
 import tls = require('tls');
 import stream = require('stream');
 import geojson = require('geojson');
+import events = require('events');
 
 export const version: string;
 export function createConnection(connectionUri: string | ConnectionConfig): Promise<Connection>;
 export function createPool(config: PoolConfig | string): Pool;
 export function createPoolCluster(config?: PoolClusterConfig): PoolCluster;
+export function importFile(config: ImportFileConfig): Promise<void>;
 export function defaultOptions(connectionUri?: string | ConnectionConfig): any;
 
-export type TypeCastResult =
-  | boolean
-  | number
-  | string
-  | symbol
-  | null
-  | Date
-  | geojson.Geometry
-  | Buffer;
+export type TypeCastResult = boolean | number | string | symbol | null | Date | geojson.Geometry | Buffer;
 export type TypeCastNextFunction = () => TypeCastResult;
 export type TypeCastFunction = (field: FieldInfo, next: TypeCastNextFunction) => TypeCastResult;
 
+export interface LoggerConfig {
+  network?: (msg: string) => void;
+  query?: (msg: string) => void;
+  error?: (err: Error) => void;
+}
+
+export function StreamCallback(err?: Error, stream?: stream.Duplex): void;
+
 export interface QueryConfig {
   /**
-   * Presents result-sets by table to avoid results with colliding fields. See the query() description for more information.
+   * Presents result-sets by table to avoid results with colliding fields.
+   * See the query() description for more information.
    */
   nestTables?: boolean | string;
 
@@ -42,6 +45,18 @@ export interface QueryConfig {
    * Return result-sets as array, rather than a JSON object. This is a faster way to get results
    */
   rowsAsArray?: boolean;
+
+  /**
+   * Compatibility option, causes Promise to return an array object,
+   * `[rows, metadata]` rather than the rows as JSON objects with a `meta` property.
+   * Default to false.
+   */
+  metaAsArray?: boolean;
+
+  /**
+   * force returning insertId as Number in place of BigInt
+   */
+  insertIdAsNumber?: boolean;
 
   /**
    * Whether to retrieve dates as strings or as Date objects.
@@ -60,28 +75,12 @@ export interface QueryConfig {
   namedPlaceholders?: boolean;
 
   /**
-   * permit to indicate server global variable max_allowed_packet value to ensure efficient batching.
-   * default is 4Mb. see batch documentation
-   */
-  maxAllowedPacket?: number;
-
-  /**
-   * When an integer is not in the safe range, the Connector interprets the value as a Long object.
-   */
-  supportBigNumbers?: boolean;
-
-  /**
    * Compatibility option to permit setting multiple value by a JSON object to replace one question mark.
    * key values will replace the question mark with format like key1=val,key2='val2'.
    * Since it doesn't respect the usual prepared statement format that one value is for one question mark,
    * this can lead to incomprehension, even if badly use to possible injection.
    */
   permitSetMultiParamEntries?: boolean;
-
-  /**
-   * When an integer is not in the safe range, the Connector interprets the value as a string
-   */
-  bigNumberStrings?: boolean;
 
   /**
    * disabled bulk command in batch.
@@ -110,9 +109,64 @@ export interface QueryConfig {
   permitLocalInfile?: boolean;
 
   /**
-   * Database server port number
+   * Allows timeout for command execution.
    */
-  port?: number;
+  timeout?: number;
+
+  /**
+   * indicate if JSON fields for MariaDB server 10.5.2+ results in JSON format (or String if disabled)
+   */
+  autoJsonMap?: boolean;
+
+  /**
+   * Indicate if array are included in parenthesis. This option permit compatibility with version < 2.5
+   */
+  arrayParenthesis?: boolean;
+
+  /**
+   * indicate to throw an exception if result-set will not contain some data due to having duplicate identifier
+   * (Default: true)
+   */
+  checkDuplicate?: boolean;
+
+  /**
+   * force returning decimal values as Number in place of String
+   *
+   * Default: false;
+   */
+  decimalAsNumber?: boolean;
+
+  /**
+   * Force returning BIGINT data as Number in place of BigInt.
+   *
+   * Default: false;
+   */
+  bigIntAsNumber?: boolean;
+
+  /**
+   * @deprecated big numbers (BIGINT and DECIMAL columns) will result as string when not in safe number range.
+   * now replaced by decimalAsNumber, bigIntAsNumber and checkNumberRange options
+   */
+  supportBigNumbers?: boolean;
+
+  /**
+   * @deprecated when used with supportBigNumbers, big numbers (BIGINT and DECIMAL columns) will always result as string
+   * even if in safe number range.
+   * now replaced by decimalAsNumber, bigIntAsNumber and checkNumberRange options
+   */
+  bigNumberStrings?: boolean;
+
+  /**
+   * Throw if conversion to Number is not safe.
+   *
+   * Default: false;
+   */
+  checkNumberRange?: boolean;
+
+  /**
+   * Configure logger
+   */
+  logger?: LoggerConfig;
 }
 
 export interface QueryOptions extends QueryConfig {
@@ -186,7 +240,7 @@ export interface ConnectionConfig extends UserConnectionConfig, QueryConfig {
   socketPath?: string;
 
   /**
-   * The milliseconds before a timeout occurs during the initial connection to the MySQL server. (Default: 10 seconds)
+   * The milliseconds before a timeout occurs during the initial connection to the MySQL server. (Default: 1000)
    */
   connectTimeout?: number;
 
@@ -258,12 +312,6 @@ export interface ConnectionConfig extends UserConnectionConfig, QueryConfig {
   forceVersionCheck?: boolean;
 
   /**
-   * indicate to throw an exception if result-set will not contain some data due to having duplicate identifier
-   * (Default: true)
-   */
-  checkDuplicate?: boolean;
-
-  /**
    * When enabled, the update number corresponds to update rows.
    * When disabled, it indicates the real rows changed.
    */
@@ -281,17 +329,15 @@ export interface ConnectionConfig extends UserConnectionConfig, QueryConfig {
   sessionVariables?: any;
 
   /**
-   * Indicate if array are included in parenthesis. This option permit compatibility with version < 2.5
+   * permit to indicate server global variable max_allowed_packet value to ensure efficient batching.
+   * default is 4Mb. see batch documentation
    */
-  arrayParenthesis?: boolean;
+  maxAllowedPacket?: number;
 
   /**
-   * indicate if JSON fields for MariaDB server 10.5.2+ results in JSON format (or String if disabled)
-   */
-  autoJsonMap?: boolean;
-
-  /**
-   * permit to enable socket keep alive, setting delay. 0 means not enabled. Keep in mind that this don't reset server [@@wait_timeout](https://mariadb.com/kb/en/library/server-system-variables/#wait_timeout) (use pool option idleTimeout for that).
+   * permit to enable socket keep alive, setting delay. 0 means not enabled. Keep in mind that this don't reset server
+   * [@@wait_timeout](https://mariadb.com/kb/en/library/server-system-variables/#wait_timeout)
+   * (use pool option idleTimeout for that).
    * in ms
    * (Default: 0)
    */
@@ -310,26 +356,65 @@ export interface ConnectionConfig extends UserConnectionConfig, QueryConfig {
   cachingRsaPublicKey?: string;
 
   /**
-   * Indicate that if `rsaPublicKey` or `cachingRsaPublicKey` public key are not provided, if client can ask server to send public key.
+   * Indicate that if `rsaPublicKey` or `cachingRsaPublicKey` public key are not provided, if client can ask server
+   * to send public key.
    * default: false
    */
   allowPublicKeyRetrieval?: boolean;
 
   /**
-   * Whether resultset should return javascript ES2020 [BigInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt)
-   * for [BIGINT](https://mariadb.com/kb/en/bigint/) data type.
-   * This ensures having expected value even for value > 2^53
-   * (see [safe](documentation/connection-options.md#support-for-big-integer) range).
+   * force returning insertId as Number in place of BigInt
    *
-   * default false
+   * Default: false;
    */
-  supportBigInt?: boolean;
+  insertIdAsNumber?: boolean;
+
+  /**
+   * Indicate prepare cache size when using prepared statement
+   *
+   * default to 256.
+   */
+  prepareCacheLength?: number;
+
+  /**
+   * Permit to set stream.
+   *
+   * @param err error is any error occurs during stream creation
+   * @param stream if wanting to set a special stream (Standard socket will be created if not set)
+   */
+  stream?: (callback?: typeof StreamCallback) => void;
+
+  /**
+   * make result-set metadata property enumerable.
+   * Default to false.
+   */
+  metaEnumerable?: boolean;
+
+  /**
+   * Compatibility option, causes Promise to return an array object,
+   * `[rows, metadata]` rather than the rows as JSON objects with a `meta` property.
+   * Default to false.
+   */
+  metaAsArray?: boolean;
+
+  /**
+   * Return result-sets as array, rather than a JSON object. This is a faster way to get results
+   */
+  rowsAsArray?: boolean;
+}
+
+export interface ImportFileConfig extends ConnectionConfig {
+  /**
+   * sql file path to import
+   */
+  file: string;
 }
 
 export interface PoolConfig extends ConnectionConfig {
   /**
-   * The milliseconds before a timeout occurs during the connection acquisition. This is slightly different from connectTimeout,
-   * because acquiring a pool connection does not always involve making a connection. (Default: 10 seconds)
+   * The milliseconds before a timeout occurs during the connection acquisition. This is slightly different from
+   * connectTimeout, because acquiring a pool connection does not always involve making a connection.
+   * (Default: 10 seconds)
    */
   acquireTimeout?: number;
 
@@ -377,6 +462,15 @@ export interface PoolConfig extends ConnectionConfig {
    * Default: false
    */
   noControlAfterUse?: boolean;
+
+  /**
+   * Permit to indicate a timeout to log connection borrowed from pool.
+   * When a connection is borrowed from pool and this timeout is reached,
+   * a message will be logged to console indicating a possible connection leak.
+   * Another message will tell if the possible logged leak has been released.
+   * A value of 0 (default) meaning Leak detection is disable
+   */
+  leakDetectionTimeout?: number;
 }
 
 export interface PoolClusterConfig {
@@ -436,7 +530,18 @@ export interface ServerVersion {
    */
   readonly patch: number;
 }
+export interface SqlImportOptions {
+  /**
+   * file path of sql file
+   */
+  file: string;
 
+  /**
+   * Name of the database to use to import sql file.
+   * If not set, current database is used.
+   */
+  database?: string;
+}
 export interface ConnectionInfo {
   /**
    * Server connection identifier value
@@ -455,13 +560,42 @@ export interface ConnectionInfo {
   serverVersion: ServerVersion;
 
   /**
+   * connection collation
+   */
+  collation: null;
+
+  /**
    * Server capabilities
    * see https://mariadb.com/kb/en/library/connection/#capabilities
    */
   readonly serverCapabilities: number;
+
+  /**
+   * Indicate when connected if server is a MariaDB or MySQL one
+   */
+  isMariaDB(): boolean;
+
+  /**
+   * return true if server version > to indicate version
+   * @param major server major version
+   * @param minor server minor version
+   * @param patch server patch version
+   */
+  hasMinVersion(major: number, minor: number, patch: number): boolean;
 }
 
-export interface Connection {
+export interface Prepare {
+  id: number;
+  execute<T = any>(values?: any): Promise<T>;
+  /**
+   * Execute query returning a Readable Object that will emit columns/data/end/error events
+   * to permit streaming big result-set
+   */
+  queryStream(values?: any): stream.Readable;
+  close(): void;
+}
+
+export interface Connection extends events.EventEmitter {
   /**
    * Connection information
    */
@@ -497,12 +631,22 @@ export interface Connection {
   /**
    * Execute query using text protocol.
    */
-  query(sql: string | QueryOptions, values?: any): Promise<any>;
+  query<T = any>(sql: string | QueryOptions, values?: any): Promise<T>;
 
   /**
-   * Execute batch using text protocol.
+   * Prepare query.
    */
-  batch(sql: string | QueryOptions, values?: any): Promise<UpsertResult[]>;
+  prepare(sql: string): Promise<Prepare>;
+
+  /**
+   * Execute query using binary (prepare) protocol
+   */
+  execute<T = any>(sql: string | QueryOptions, values?: any): Promise<T>;
+
+  /**
+   * Execute batch. Values are Array of Array.
+   */
+  batch<T = UpsertResult | UpsertResult[]>(sql: string | QueryOptions, values?: any): Promise<T>;
 
   /**
    * Execute query returning a Readable Object that will emit columns/data/end/error events
@@ -525,6 +669,11 @@ export interface Connection {
    * - remove all PREPARE statement
    */
   reset(): Promise<void>;
+
+  /**
+   * import sql file
+   */
+  importFile(config: SqlImportOptions): Promise<void>;
 
   /**
    * Indicates the state of the connection as the driver knows it
@@ -566,9 +715,11 @@ export interface Connection {
   escape(value: any): string;
 
   /**
-   * This function permit to escape a Identifier properly . See Identifier Names for escaping. Value will be enclosed by '`' character if content doesn't satisfy:
+   * This function permit to escape a Identifier properly . See Identifier Names for escaping. Value will be enclosed
+   * by '`' character if content doesn't satisfy:
    * <OL>
-   *  <LI>ASCII: [0-9,a-z,A-Z$_] (numerals 0-9, basic Latin letters, both lowercase and uppercase, dollar sign, underscore)</LI>
+   *  <LI>ASCII: [0-9,a-z,A-Z$_] (numerals 0-9, basic Latin letters, both lowercase and uppercase, dollar sign,
+   *  underscore)</LI>
    *  <LI>Extended: U+0080 .. U+FFFF and escaping '`' character if needed.</LI>
    * </OL>
    * @param identifier identifier
@@ -577,6 +728,9 @@ export interface Connection {
 
   on(ev: 'end', callback: () => void): Connection;
   on(ev: 'error', callback: (err: SqlError) => void): Connection;
+  on(eventName: string | symbol, listener: (...args: any[]) => void): this;
+  listeners(ev: 'end'): (() => void)[];
+  listeners(ev: 'error'): ((err: SqlError) => void)[];
 }
 
 export interface PoolConnection extends Connection {
@@ -587,6 +741,7 @@ export interface PoolConnection extends Connection {
 }
 
 export interface Pool {
+  closed: boolean;
   /**
    * Retrieve a connection from pool.
    * Create a new one, if limit is not reached.
@@ -597,17 +752,27 @@ export interface Pool {
   /**
    * Execute a query on one connection from pool.
    */
-  query(sql: string | QueryOptions, values?: any): Promise<any>;
+  query<T = any>(sql: string | QueryOptions, values?: any): Promise<T>;
 
   /**
    * Execute a batch on one connection from pool.
    */
-  batch(sql: string | QueryOptions, values?: any): Promise<UpsertResult[]>;
+  batch<T = UpsertResult | UpsertResult[]>(sql: string | QueryOptions, values?: any): Promise<T>;
+
+  /**
+   * Execute query using binary (prepare) protocol
+   */
+  execute<T = any>(sql: string | QueryOptions, values?: any): Promise<T>;
 
   /**
    * Close all connection in pool
    */
   end(): Promise<void>;
+
+  /**
+   * import sql file
+   */
+  importFile(config: SqlImportOptions): Promise<void>;
 
   /**
    * Get current active connections.
@@ -636,9 +801,11 @@ export interface Pool {
   escape(value: any): string;
 
   /**
-   * This function permit to escape a Identifier properly . See Identifier Names for escaping. Value will be enclosed by '`' character if content doesn't satisfy:
+   * This function permit to escape a Identifier properly . See Identifier Names for escaping. Value will be enclosed
+   * by '`' character if content doesn't satisfy:
    * <OL>
-   *  <LI>ASCII: [0-9,a-z,A-Z$_] (numerals 0-9, basic Latin letters, both lowercase and uppercase, dollar sign, underscore)</LI>
+   *  <LI>ASCII: [0-9,a-z,A-Z$_] (numerals 0-9, basic Latin letters, both lowercase and uppercase, dollar sign,
+   *  underscore)</LI>
    *  <LI>Extended: U+0080 .. U+FFFF and escaping '`' character if needed.</LI>
    * </OL>
    * @param identifier identifier
@@ -653,8 +820,9 @@ export interface Pool {
 
 export interface FilteredPoolCluster {
   getConnection(): Promise<PoolConnection>;
-  query(sql: string | QueryOptions, values?: any): Promise<any>;
-  batch(sql: string | QueryOptions, values?: any): Promise<UpsertResult[]>;
+  query<T = any>(sql: string | QueryOptions, values?: any): Promise<T>;
+  batch<T = UpsertResult | UpsertResult[]>(sql: string | QueryOptions, values?: any): Promise<T>;
+  execute<T = any>(sql: string | QueryOptions, values?: any): Promise<T>;
 }
 
 export interface PoolCluster {
@@ -664,11 +832,13 @@ export interface PoolCluster {
   of(pattern: undefined | null | false, selector: string): FilteredPoolCluster;
   remove(pattern: string): void;
   getConnection(pattern?: string, selector?: string): Promise<PoolConnection>;
+
+  on(ev: 'remove', callback: (nodekey: string) => void): PoolCluster;
 }
 
 export interface UpsertResult {
   affectedRows: number;
-  insertId: number;
+  insertId: number | bigint;
   warningStatus: number;
 }
 
@@ -682,8 +852,14 @@ export interface SqlError extends Error {
 
   /**
    * original error message value
+   * @deprecated since 3.2.0 prefer using sqlMessage for compatibility with other drivers.
    */
   text: string | null;
+
+  /**
+   * original error message value
+   */
+  sqlMessage: string | null;
 
   /**
    * The sql command associate
@@ -826,6 +1002,7 @@ export interface Collation {
   index: number;
   name: string;
   encoding: string;
+  maxLength: number;
   fromEncoding(encoding: string): Collation;
   fromIndex(index: number): Collation;
   fromName(name: string): Collation;

@@ -4,58 +4,33 @@ const base = require('../base.js');
 const { assert } = require('chai');
 const ServerStatus = require('../../lib/const/server-status');
 const Conf = require('../conf');
+const { isXpand } = require('../base');
 
 describe('change user', () => {
-  before((done) => {
-    Promise.all([
-      shareConn.query("DROP USER IF EXISTS ChangeUser@'%'"),
-      shareConn.query("DROP USER IF EXISTS ChangeUser2@'%'")
-    ])
-      .then(() => {
-        return shareConn.query('CREATE DATABASE IF NOT EXISTS test');
-      })
-      .then(() => {
-        return shareConn.query("CREATE USER ChangeUser@'%' IDENTIFIED BY 'm1P4ssw0@rd'");
-      })
-      .then(() => {
-        return shareConn.query(
-          'GRANT SELECT,EXECUTE ON `' + Conf.baseConfig.database + "`.* TO ChangeUser@'%'"
-        );
-      })
-      .then(() => {
-        return shareConn.query("CREATE USER ChangeUser2@'%' IDENTIFIED BY 'm1SecondP@rd'");
-      })
-      .then(() => {
-        return shareConn.query(
-          'GRANT SELECT,EXECUTE ON `' +
-            Conf.baseConfig.database +
-            "`.* TO ChangeUser2@'%' with grant option"
-        );
-      })
-      .then(() => {
-        return shareConn.query('FLUSH PRIVILEGES');
-      })
-      .then(() => done())
-      .catch((err) => done());
+  before(async () => {
+    if (process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha') {
+      await shareConn.query("DROP USER ChangeUser@'%'").catch((e) => {});
+      await shareConn.query("DROP USER ChangeUser2@'%'").catch((e) => {});
+      await shareConn.query('CREATE DATABASE IF NOT EXISTS test');
+      await shareConn.query("CREATE USER ChangeUser@'%' IDENTIFIED BY 'm1P4ssw0@rd'");
+      await shareConn.query('GRANT SELECT,EXECUTE ON `' + Conf.baseConfig.database + "`.* TO ChangeUser@'%'");
+      await shareConn.query("CREATE USER ChangeUser2@'%' IDENTIFIED BY 'm1SecondP@rd'");
+      await shareConn.query(
+        'GRANT SELECT,EXECUTE ON `' + Conf.baseConfig.database + "`.* TO ChangeUser2@'%' with grant option"
+      );
+      await shareConn.query('FLUSH PRIVILEGES');
+    }
   });
 
-  after((done) => {
-    shareConn
-      .query("DROP USER IF EXISTS ChangeUser@'%'")
-      .then(() => {
-        return shareConn.query("DROP USER IF EXISTS ChangeUser2@'%'");
-      })
-      .then(() => {
-        return shareConn.query('FLUSH PRIVILEGES');
-      })
-      .then(() => {
-        done();
-      })
-      .catch((err) => done());
+  after(async () => {
+    if (process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha') {
+      await shareConn.query("DROP USER ChangeUser@'%'").catch((e) => {});
+      await shareConn.query("DROP USER ChangeUser2@'%'").catch((e) => {});
+    }
   });
 
   it('basic change user using callback', function (done) {
-    if (process.env.srv == 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv == 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
@@ -81,7 +56,7 @@ describe('change user', () => {
   });
 
   it('wrong charset', function (done) {
-    if (process.env.MAXSCALE_TEST_DISABLE) this.skip();
+    if (process.env.srv == 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base.createConnection().then((conn) => {
       conn
@@ -102,7 +77,7 @@ describe('change user', () => {
   });
 
   it('wrong collation in charset', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base.createConnection().then((conn) => {
       conn
@@ -120,7 +95,7 @@ describe('change user', () => {
   });
 
   it('wrong collation', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base.createConnection().then((conn) => {
       conn
@@ -141,7 +116,7 @@ describe('change user', () => {
   });
 
   it('basic change user using callback no function', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
@@ -161,7 +136,7 @@ describe('change user', () => {
   });
 
   it('callback change user without option', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
@@ -181,7 +156,7 @@ describe('change user', () => {
   });
 
   it('basic change user using promise', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
 
     base
@@ -219,8 +194,47 @@ describe('change user', () => {
       .catch(done);
   });
 
+  it('change user using connection attributes', function (done) {
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (!shareConn.info.isMariaDB()) this.skip();
+
+    base
+      .createConnection({ connectAttributes: { param1: 'test' } })
+      .then((conn) => {
+        return conn
+          .changeUser({
+            user: 'ChangeUser',
+            password: 'm1P4ssw0@rd',
+            connectAttributes: { par1: 'bouh', par2: 'bla' }
+          })
+          .then(() => {
+            return conn.query('SELECT CURRENT_USER');
+          })
+          .then((res) => {
+            const user = res[0]['CURRENT_USER'];
+            assert.equal(user, 'ChangeUser@%');
+            return conn.changeUser({
+              user: 'ChangeUser2',
+              password: 'm1SecondP@rd',
+              connectAttributes: true
+            });
+          })
+          .then(() => {
+            return conn.query('SELECT CURRENT_USER');
+          })
+          .then((res) => {
+            const user = res[0]['CURRENT_USER'];
+            assert.equal(user, 'ChangeUser2@%');
+            conn.end();
+            done();
+          })
+          .catch(done);
+      })
+      .catch(done);
+  });
+
   it('basic change user using promise non node.js encoding', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
 
     base
@@ -260,7 +274,7 @@ describe('change user', () => {
   });
 
   it('change user with collation', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base
       .createConnection()
@@ -300,7 +314,7 @@ describe('change user', () => {
   });
 
   it('autocommit state after changing user', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base
       .createConnection()
@@ -323,7 +337,6 @@ describe('change user', () => {
               shareConn.info.isMariaDB() &&
               shareConn.info.hasMinVersion(10, 2, 2) &&
               process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql' &&
               process.env.srv !== 'skysql-ha'
             ) {
               assert.equal(conn.info.database, 'test');

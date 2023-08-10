@@ -6,7 +6,8 @@ const baseCallback = require('../../../callback');
 const Collations = require('../../../lib/const/collations.js');
 
 describe('test options', () => {
-  it('default options', () => {
+  it('default options', function () {
+    if (process.env.srv === 'xpand') this.skip();
     const defaultOpts = basePromise.defaultOptions({ timezone: '+00:00' });
     const defaultOptsCall = baseCallback.defaultOptions({ timezone: '+00:00' });
     const expected = {
@@ -15,19 +16,22 @@ describe('test options', () => {
       user: process.env.USERNAME,
       password: undefined,
       database: undefined,
-      collation: Collations.fromName('UTF8MB4_UNICODE_CI'),
+      prepareCacheLength: 256,
+      collation: undefined,
       initSql: undefined,
-      connectTimeout: 10000,
+      connectTimeout: 1000,
       connectAttributes: false,
       compress: false,
       rsaPublicKey: undefined,
       cachingRsaPublicKey: undefined,
+      restrictedAuth: undefined,
       allowPublicKeyRetrieval: false,
       forceVersionCheck: false,
       maxAllowedPacket: undefined,
       permitConnectionWhenExpired: false,
       pipelining: true,
       timezone: '+00:00',
+      bitOneIsBoolean: true,
       socketPath: undefined,
       sessionVariables: undefined,
       ssl: undefined,
@@ -37,12 +41,19 @@ describe('test options', () => {
       debug: false,
       debugCompress: false,
       debugLen: 256,
-      logPackets: false,
       trace: false,
       checkDuplicate: true,
+      checkNumberRange: false,
       dateStrings: false,
       foundRows: true,
+      logger: {
+        error: null,
+        network: null,
+        query: null,
+        logParam: false
+      },
       metaAsArray: false,
+      metaEnumerable: false,
       multipleStatements: false,
       namedPlaceholders: false,
       nestTables: undefined,
@@ -50,14 +61,15 @@ describe('test options', () => {
       arrayParenthesis: false,
       permitSetMultiParamEntries: false,
       rowsAsArray: false,
-      supportBigNumbers: false,
-      supportBigInt: false,
-      skipSetTimezone: false,
+      decimalAsNumber: false,
+      insertIdAsNumber: false,
       typeCast: undefined,
-      bigNumberStrings: false,
+      stream: undefined,
+      bigIntAsNumber: false,
       bulk: true,
       permitLocalInfile: false,
-      tz: 'Etc/UTC'
+      bigNumberStrings: false,
+      supportBigNumbers: false
     };
     assert.deepEqual(expected, defaultOpts);
     assert.deepEqual(expected, defaultOptsCall);

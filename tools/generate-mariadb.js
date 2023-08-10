@@ -11,11 +11,9 @@ const readline = require('readline');
 const os = require('os');
 const path = require('path');
 
-const version = '10.5';
-const extendedUrl =
-  'https://raw.githubusercontent.com/MariaDB/server/' + version + '/sql/share/errmsg-utf8.txt';
-const baseUrl =
-  'https://raw.githubusercontent.com/MariaDB/server/' + version + '/include/my_base.h';
+const version = '10.9';
+const extendedUrl = 'https://raw.githubusercontent.com/MariaDB/server/' + version + '/sql/share/errmsg-utf8.txt';
+const baseUrl = 'https://raw.githubusercontent.com/MariaDB/server/' + version + '/include/my_base.h';
 const fileName = path.join(os.tmpdir(), 'mariadb_errmsg.txt');
 const fileNameBase = path.join(os.tmpdir(), 'my_base.h');
 const destFileName = path.join(__dirname, '/../lib/const/error-code.js');
@@ -45,7 +43,7 @@ const writeFile = function () {
   const writer = fs.createWriteStream(destFileName);
 
   const header =
-    '"use strict";\n\n' +
+    "'use strict';\n\n" +
     '/**\n' +
     ' * File generated using test/tools/generate-mariadb.js\n' +
     ' * from MariaDB ' +

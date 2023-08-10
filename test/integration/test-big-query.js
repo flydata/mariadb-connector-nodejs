@@ -7,34 +7,82 @@ describe('Big query', function () {
   const testSize = 16 * 1024 * 1024 + 800; // more than one packet
   let maxAllowedSize, buf;
 
-  before(function (done) {
-    shareConn
-      .query('SELECT @@max_allowed_packet as t')
-      .then((row) => {
-        maxAllowedSize = row[0].t;
-        if (testSize < maxAllowedSize) {
-          buf = Buffer.alloc(testSize);
-          for (let i = 0; i < testSize; i++) {
-            buf[i] = 97 + (i % 10);
-          }
-        }
-        done();
-      })
-      .catch(done);
+  before(async function () {
+    const row = await shareConn.query('SELECT @@max_allowed_packet as t');
+    maxAllowedSize = Number(row[0].t);
+    if (process.env.srv === 'skysql-ha' || process.env.srv === 'skysql') {
+      maxAllowedSize = 16 * 1024 * 1024;
+    }
+    if (testSize < maxAllowedSize + 100) {
+      buf = Buffer.alloc(testSize);
+      for (let i = 0; i < testSize; i++) {
+        buf[i] = 97 + (i % 10);
+      }
+    }
   });
 
   it('parameter bigger than 16M packet size', async function () {
     if (maxAllowedSize <= testSize) this.skip();
-    this.timeout(20000); //can take some time
-    shareConn.query('DROP TABLE IF EXISTS bigParameterBigParam');
-    shareConn.query('CREATE TABLE bigParameterBigParam (b longblob)');
-    await shareConn.query('FLUSH TABLES');
-    shareConn.beginTransaction();
-    shareConn.query('insert into bigParameterBigParam(b) values(?)', [buf]);
-    const rows = await shareConn.query('SELECT * from bigParameterBigParam');
-    assert.deepEqual(rows[0].b, buf);
-    shareConn.commit();
+    this.timeout(30000); //can take some time
+    await testParameterBiggerThan16M(shareConn);
+    const con = await base.createConnection({ bulk: false });
+    await testParameterBiggerThan16M(con);
+    await con.end();
   });
+
+  const testParameterBiggerThan16M = async function (conn) {
+    conn.query('DROP TABLE IF EXISTS bigParameterBigParam');
+    conn.query('CREATE TABLE bigParameterBigParam (b longblob)');
+    await conn.query('FLUSH TABLES');
+
+    conn.beginTransaction();
+    conn.query('insert into bigParameterBigParam(b) values(?)', [buf]);
+    const rows = await conn.query('SELECT * from bigParameterBigParam');
+    assert.deepEqual(rows[0].b, buf);
+    conn.rollback();
+
+    conn.beginTransaction();
+    await conn.batch('insert into bigParameterBigParam(b) values(?)', [['test'], [buf], ['test2']]);
+    const rows2 = await conn.query('SELECT * from bigParameterBigParam');
+    assert.deepEqual(rows2[0].b, Buffer.from('test'));
+    assert.deepEqual(rows2[1].b, buf);
+    assert.deepEqual(rows2[2].b, Buffer.from('test2'));
+    conn.rollback();
+
+    conn.query(`insert into bigParameterBigParam(b) /*${buf.toString()}*/ values(?)`, ['a']);
+
+    await conn.query('DROP TABLE IF EXISTS bigParameterBigParam');
+    await conn.query('CREATE TABLE bigParameterBigParam (b tinyblob)');
+    await conn.query('FLUSH TABLES');
+
+    await conn.beginTransaction();
+    try {
+      await conn.batch('insert into bigParameterBigParam(b) values(?)', [['test'], [buf], ['test2']]);
+      throw Error('must have thrown error');
+    } catch (e) {
+      assert.isTrue(
+        e.sql.includes(
+          "insert into bigParameterBigParam(b) values(?) - parameters:[['test'],[0x6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162...]"
+        ) ||
+          e.sql.includes(
+            'insert into bigParameterBigParam(b) values(?) - parameters:[0x6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a6162636465666768696a61626364656667...]'
+          )
+      );
+    }
+
+    try {
+      await conn.batch({ sql: 'insert into bigParameterBigParam(b) values(?)', debugLen: 12 }, [
+        ['test'],
+        [buf],
+        ['test2']
+      ]);
+      throw Error('must have thrown error');
+    } catch (e) {
+      assert.isTrue(e.sql.includes('insert into ...'));
+    }
+
+    conn.rollback();
+  };
 
   it('int8 buffer overflow', async function () {
     const buf = Buffer.alloc(979, '0');

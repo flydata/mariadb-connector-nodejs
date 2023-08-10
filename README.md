@@ -1,6 +1,6 @@
-<p align="center">
-  <a href="http://mariadb.com/">
-    <img src="https://mariadb.com/kb/static/images/logo-2018-black.png">
+<p style="text-align: center;">
+  <a href="https://mariadb.com/">
+    <img src="https://mariadb.com/kb/static/images/logo-2018-black.png"/>
   </a>
 </p>
 
@@ -15,20 +15,31 @@
 
 MariaDB and MySQL client, 100% JavaScript, with TypeScript definition, with the Promise API.
 
-version before 2.4 is compatible with Node.js 6+
-version after 2.4 is compatible with Node.js 10+
-
 
 ## Documentation
 
 See [promise documentation](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/master/documentation/promise-api.md) for detailed API. 
 
 [Callback documentation](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/master/documentation/callback-api.md) describe the callback wrapper for compatibility with existing drivers.
+
+See [dedicated part](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/master/documentation/promise-api.md#migrating-from-2x-or-mysqlmysql2-to-3x) for migration from mysql/mysql2 or from 2.x version.
+
    
 ## Why a New Client?
 
 While there are existing MySQL clients that work with MariaDB, (such as the [`mysql`](https://www.npmjs.com/package/mysql) and [`mysql2`](https://www.npmjs.com/package/mysql2) clients), the MariaDB Node.js Connector offers new functionality, like [Insert Streaming](#insert-streaming), [Pipelining](#pipelining), [ed25519 plugin authentication](https://mariadb.org/history-of-mysql-mariadb-authentication-protocols/) while making no compromises on performance.
 
+Connector is production grade quality, with multiple features:
+* superfast batching
+* fast pool
+* easy debugging, trace pointing to code line on error
+* allows data streaming without high memory consumption
+* pipelining
+* metadata skipping (for MariaDB server only)
+* sql file import
+* ...
+
+see some of those features:
 
 ### Insert Streaming 
 
@@ -46,8 +57,8 @@ Using a Readable stream in your application, you can stream `INSERT` statements 
 
 With Pipelining, the Connector sends commands without waiting for server results, preserving order.  For instance, consider the use of executing two `INSERT`  statements.
 
-<p align="center">
-    <img src="./documentation/misc/pip.png">
+<p style="text-align: center;">
+    <img src="./documentation/misc/pip.png" alt="pipelining example"/>
 </p>
 
 The Connector doesn't wait for query results before sending the next `INSERT` statement. Instead, it sends queries one after the other, avoiding much of the network latency.
@@ -63,57 +74,43 @@ For more information, see the [Batch](/documentation/batch.md) documentation.
 
 ## Benchmarks
 
-MariaDB provides benchmarks comparing the Connector with popular Node.js MySQL clients, including: 
+MariaDB provides benchmarks comparing the Connector with other Node.js MariaDB/MySQL clients, including: 
 
-* [`promise-mysql`](https://www.npmjs.com/package/promise-mysql) version 4.0.4 + [`mysql`](https://www.npmjs.com/package/mysql) version 2.17.1 
-* [`mysql2`](https://www.npmjs.com/package/mysql2) version 1.6.5
+* [`promise-mysql`](https://www.npmjs.com/package/promise-mysql) version 5.2.0 + [`mysql`](https://www.npmjs.com/package/mysql) version 2.18.1
+* [`mysql2`](https://www.npmjs.com/package/mysql2) version 3.1.0
+
+See the [Benchmarks](./documentation/benchmarks.md) page for multiple results.
+
+#### query
 
 ```
-promise-mysql  : 646 ops/sec ±2.20%
-mysql2         : 746 ops/sec ±2.35%
-mariadb        : 961 ops/sec ±2.82%
+select 100 int
+            mysql :  2,738.7 ops/s ± 1.3% 
+           mysql2 :  2,404.9 ops/s ± 1.3%  (  -12.2% )
+          mariadb :  5,650.8 ops/s ± 1.4%  ( +106.3% )
 ```
+![select 100 int benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=2739&data2=2405&data3=5651)
 
-query: **SELECT &lt; all mysql fields &gt;, 1 FROM mysql.user LIMIT 1**
+#### execute
 
-<img src="./documentation/misc/bench.png" width="559" height="209"/>
+##  select 100 int - BINARY
 
-For more information, see the [Benchmarks](/documentation/benchmarks.md) page.
+```
+select 100 int - BINARY
+           mysql2 :  2,473.4 ops/s ± 1.3% 
+          mariadb :   10,533 ops/s ± 1.7%  ( +325.9% )
+```
+![select 100 int - BINARY benchmark results](https://quickchart.io/chart/render/zm-36b213f4-8efe-4943-8f94-82edf94fce83?data1=2473&data2=10533)
+
 
 ## Quick Start
 
-The MariaDB Connector is available through the Node.js repositories.  You can install it using npm :
+The MariaDB Connector is available through the Node.js repositories. You can install it using npm :
 
 ```
 $ npm install mariadb
 ```
-
-Using ECMAScript < 2017:
-
-```js
-const mariadb = require('mariadb');
-const pool = mariadb.createPool({host: process.env.DB_HOST, user: process.env.DB_USER, connectionLimit: 5});
-pool.getConnection()
-    .then(conn => {
-    
-      conn.query("SELECT 1 as val")
-        .then(rows => { // rows: [ {val: 1}, meta: ... ]
-          return conn.query("INSERT INTO myTable value (?, ?)", [1, "mariadb"]);
-        })
-        .then(res => { // res: { affectedRows: 1, insertId: 1, warningStatus: 0 }
-          conn.release(); // release to pool
-        })
-        .catch(err => {
-          conn.release(); // release to pool
-        })
-        
-    }).catch(err => {
-      //not connected
-    });
-```
-
-Using ECMAScript 2017:
-
+example:
 ```js
 const mariadb = require('mariadb');
 const pool = mariadb.createPool({host: process.env.DB_HOST, user: process.env.DB_USER, connectionLimit: 5});
@@ -129,8 +126,6 @@ async function asyncFunction() {
 	const res = await conn.query("INSERT INTO myTable value (?, ?)", [1, "mariadb"]);
 	// res: { affectedRows: 1, insertId: 1, warningStatus: 0 }
 
-  } catch (err) {
-	throw err;
   } finally {
 	if (conn) conn.release(); //release to pool
   }
@@ -139,13 +134,13 @@ async function asyncFunction() {
 
 ## Contributing 
 
-If you would like to contribute to the MariaDB Node.js Connector, please follow the instructions given in the [Developers Guide.](/documentation/developers-guide.md)
+If you would like to contribute to the MariaDB Node.js Connector, please follow the instructions given in the [contributing guide.](/CONTRIBUTING.md)
 
 To file an issue or follow the development, see [JIRA](https://jira.mariadb.org/projects/CONJS/issues/).
 
 
 [travis-image]:https://travis-ci.com/mariadb-corporation/mariadb-connector-nodejs.svg?branch=master
-[travis-url]:https://travis-ci.com/mariadb-corporation/mariadb-connector-nodejs
+[travis-url]:https://app.travis-ci.com/github/mariadb-corporation/mariadb-connector-nodejs
 [npm-image]:https://img.shields.io/npm/v/mariadb.svg
 [npm-url]:http://npmjs.org/package/mariadb
 [licence-image]:https://img.shields.io/badge/license-GNU%20LGPL%20version%202.1-green.svg?style=flat-square

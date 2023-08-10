@@ -1,5 +1,247 @@
 # Change Log
 
+## [3.2.0](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.2.0) (Jun 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.1.2...3.2.0)
+
+## Notable changes
+* CONJS-250	'undefined' parameters are now permitted, for compatibility with mysql/mysql2 behavior
+* CONJS-257	permit to import sql file directly
+
+#### new APIs:
+  [importFile(options) → Promise](./documentation/promise-api.md#importfileoptions--promise)
+  [connection.importFile({file:'...', 'database': '...'}) → Promise](./documentation/promise-api.md##connectionimportfileoptions--promise)
+  [pool.importFile({file:'...', 'database': '...'}) → Promise](./documentation/promise-api.md#poolimportfileoptions--promise)
+
+example: 
+```javascript
+    await conn.importFile({
+        file: '/tmp/someFile.sql', 
+        database: 'myDb'
+    });
+```
+
+## Issues Fixed
+* CONSJ-252 missing deprecated option supportBigNumbers and bigNumberStrings in Typescript
+* CONJS-254 ensuring option connectTimeout is respected : timeout is removed when socket is successfully established, in place of returning connection object. Wasn't set when using pipe/unix socket
+* CONJS-255	In some case, pipelining was use even option explicitly disable it
+* CONJS-256 method changeUser can lead to error when using multi-authentication and pipelining
+* CONJS-258	All eventEmitters methods are not available on connections
+
+## [3.1.2](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.1.2) (May 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.1.1...3.1.2)
+
+## Notable changes
+* CONJS-249	add connection.listeners function to permit TypeORM compatibility
+
+## Issues Fixed
+* CONJS-247	Improve error message when having set named parameter option and executing standard question mark command
+* CONJS-248	Ensuring not using importing file after pool.end()
+
+## [3.1.1](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.1.1) (Mar 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.1.0...3.1.1)
+
+## Issues Fixed
+* CONJS-246 pool not listening to 'error' event might exit application on error
+* CONJS-240 Repeating calling the same procedure gets a release prepare error.
+* CONJS-244 correction for node.js 12 compatibility
+* CONJS-245 batch failing when using bulk and metaAsArray
+
+
+## [3.1.0](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.1.0) (Feb 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.0.2...3.1.0)
+
+## Notable changes
+
+### Timezone handling (CONJS-237)
+
+Connector now set session timezone, solving issue with [time function](https://mariadb.com/kb/en/time-zones/#time-zone-effects-on-functions), 
+removing needs of client side conversion.
+
+This requires that when using timezone options, to having server TZ data filled in case client timezone differ from server.
+
+### Performance
+* CONJS-230 better metadata parsing performance
+* CONJS-229 performance improvement when parsing lots of parameter
+* CONJS-238 faster execution for known length packet
+
+### Other changes
+* CONJS-225 Make result set's meta property non-enumerable
+* CONJS-235 Allow to pass TypeScript generic types without need of "as"
+
+## Issues Fixed
+* CONJS-231 executing batch and when parameter can be too long to fit in one mysql packet, parameter can have 4 byte missing 
+* CONJS-236 datatype TIME wrong binary decoding when not having microseconds
+* CONJS-239 When using connection with callback, pre-commands (like `initSql`) might not always be executed first
+* CONJS-232 in case of a long query running, connection.destroy() will close connection, but leaving server still running query for some time
+* CONJS-240 adding a Prepare result wrapper to avoid multiple close issue with cache
+* CONJS-241 metaAsArray missing option in typescript description
+
+
+## [3.0.2](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.0.2) (Oct 2022)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.0.1...3.0.2)
+
+## Notable changes
+* CONJS-222	permit streaming prepare statement result
+example : 
+```javascript
+const prepare = await shareConn.prepare('SELECT * FROM mysql.user where host = ?');
+const stream = prepare.executeStream(['localhost']);    
+try {
+  for await (const row of stream) {
+    console.log(row);
+  }
+} catch (e) {
+  queryStream.close();
+}
+prepare.close();
+```
+
+## Issues Fixed
+* CONJS-223	Metadata column name gets sporadic corrupted
+* CONJS-211	Session timezone unset on connection re-use with connection pool
+* CONJS-212	when throwing an error when using option `leakDetectionTimeout`, might result in throwing wrong error with `Cannot read properties of null (reading 'leaked')`
+* CONJS-217	caching_sha2_password never succeed using FAST AUTHENTICATION. With correction, one less exchanges is done when connecting to a MySQL server
+* CONJS-219	prepare cache was not limited to `prepareCacheLength` but can increase up to 2x the `prepareCacheLength` value, leading to possible ER_MAX_PREPARED_STMT_COUNT_REACHED
+* CONJS-228	improving prepare cache performance
+* CONJS-226	missing typescript metaAsArray option and documentation
+* CONJS-213	update error code with recent MariaDB server
+* CONJS-215	Executing after prepare close throw an undescriptive error
+* CONJS-221	option debugLen and logParam are not documented
+* CONJS-227	Allow setting idleTimeout to 0
+* CONJS-214	missing pool.closed typescript definition
+* CONJS-216	remove please-upgrade-node dependency
+* CONJS-224	missing typescript checkNumberRange option definition
+
+
+## [3.0.1](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.0.1) (Jul 2022)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.0.0...3.0.1)
+
+## Notable changes
+* Error description improvement
+  * Pool might return a common error ‘retrieve connection from pool timeout after XXXms’ in place of real error.[CONJS-200]
+  * [CONJS-209] Trace option now works when using pool/cluster. It is recommended to activate the trace option in development Since driver is asynchronous, enabling this option to save initial stack when calling any driver methods. This allows having the caller method and line in the error stack, permitting error easy debugging. The problem is this error stack is created using Error.captureStackTrace that is very very slow. To give an idea, this slows down by 10% a query like 'select * from mysql.user LIMIT 1', so not recommended in production.
+      ```javascript
+      const pool = mariadb.createPool({
+      host: 'mydb.com',
+      user: 'myUser',
+      connectionLimit: 5,
+      trace: true
+      });
+      await pool.query('wrong query');
+      /* will throw an error like :
+        SqlError: (conn=15868, no: 1064, SQLState: 42000) You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'wrong query' at line 1
+          sql: wrong query - parameters:[]
+            at Object.module.exports.createError (errors.js:57:10)
+            at ...
+          From event:
+            at Function._PARAM (\integration\test-pool.js:60:18)
+            at …
+          text: "You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'wrong query' at line 1",
+          sql: 'wrong query - parameters:[]',
+          fatal: false,
+          errno: 1064,
+          sqlState: '42000',
+          code: 'ER_PARSE_ERROR'
+      */
+      ```
+  * Pool error description is improved indicating pool information, like [CONJS-208]:
+    ```javascript
+    SqlError: (conn=-1, no: 45028, SQLState: HY000) retrieve connection from pool timeout after 200ms
+      (pool connections: active=1 idle=0 limit=1)
+      at Object.module.exports.createError
+      …
+    ```
+* node.js 18 supported [CONJS-197]
+* New option `checkNumberRange`. When used in conjunction of `decimalAsNumber`, `insertIdAsNumber` or `bigIntAsNumber`, if conversion to number is not exact, connector will throw an error [CONJS-198]. This permits easier compatibility with mysql/mysql2 and 2.x version driver version.
+* Performance enhancement for multi-rows resultset. Internal benchmarks show improved performance by 10% for a result-set of 1000 rows.[CONJS-210]
+
+## Issues Fixed
+
+* Wrong error returned "Cannot read properties of undefined… … (reading 'charset')" when error during handshake [CONJS-193]
+* [CONJS-194] Charset change using parameterized query fails with "Uncaught TypeError: opts.emit is not a function"
+* [CONJS-195] Error "cannot mix BigInt and other types" when parsing negative bigint
+* [CONJS-196] connection.close() is now really an alias or connection.release()
+* [CONJS-199] wrong return type for batch() on typescript
+* [CONJS-201] typecast geometry parsing error
+* [CONJS-202] support pre 4.1 error format for 'too many connection' error
+* [CONJS-203] encoding error for connection attributes when using changeUser with connection attributes
+* [CONJS-206] possible race condition on connection destroy when no other connection can be created
+* [CONJS-204] handle password array when using authentication plugin “pam_use_cleartext_plugin”
+* [CONJS-205] query hanging when using batch with option timeout in place of error thrown
+
+
+## [3.0.0](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.0.0) (Jan 2022)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.0.0-rc...3.0.0)
+
+* merged correction from 2.5.6
+* [CONJS-185] considering BIT(1) as boolean (option bitOneIsBoolean permit to disable that behavior for compatibility)
+* reliability: pool ensuring multi-request process order
+* performance: set parser function once per result-set 
+* documentation improvement
+
+## [2.5.6](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/2.5.6) (Jan 2022)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/2.5.5...2.5.6)
+
+* [CONJS-181] Local infile file validation doesn't take in account escaped value
+* [CONJS-183] change default connection timeout value 1 second to permit pools to send correct error
+* update documentation with for-await-of use #189
+* correct character_set_client unexpect error parsing OK_Packet #177
+
+## [3.0.0-rc](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.0.0-rc) (19 Oct 2021)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.0.0-beta...3.0.0-rc)
+
+Notable change:
+* [CONJS-168] stream backpressure not handled well
+* [CONJS-172] performance improvement for multi-line result-set + update perf result with recent mysql/mysql2 drivers see [dedicated part](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/maintenance/3.x/documentation/benchmarks.md) results. 
+* [CONJS-168] correct stream backpressure
+* [CONJS-176] Change Pool cluster default option removeNodeErrorCount value to Infinity
+* [CONJS-175] Missing leakDetectionTimeout option in Typescript description
+* [CONJS-178] Update code to recent Ecma version
+* [CONJS-179] better pool option `resetAfterUse` default value
+* [CONJS-180] compatibility: support mysql2 `stream` option
+* 
+* Corrections:
+* [CONJS-125] permit using batch with returning clause
+* [CONJS-170] Pool.query(undefined) never release connection
+* [CONJS-173] not permitting providing null as a value without an array
+
+## [3.0.0-beta](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.0.0-beta) (11 Jun 2021)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/2.5.4...3.0.0-beta)
+
+Migrating from 2.x or mysql/mysql2 driver have some breaking changes, see [dedicated part](./documentation/promise-api.md#migrating-from-2x-or-mysqlmysql2-to-3x) documentation.
+
+* [CONJS-153] support Prepared statement with 10.6 new feature metadata skip
+* [CONJS-165] Adding initial message error value on Error object
+* [CONJS-166] Restrict authentication plugin list
+* [CONJS-167] Permit custom logger configuration
+
+New Connection options
+
+|option|description|type|default|
+|---:|---|:---:|:---:| 
+| **insertIdAsNumber** | Whether the query should return last insert id from INSERT/UPDATE command as BigInt or Number. default return BigInt |*boolean* | false |
+| **decimalAsNumber** | Whether the query should return decimal as Number. If enable, this might return approximate values. |*boolean* | false |
+| **bigIntAsNumber** | Whether the query should return BigInt data type as Number. If enable, this might return approximate values. |*boolean* | false |
+| **logger** | Permit custom logger configuration. For more information, see the [`logger` option](#logger) documentation. |*mixed*|
+| **prepareCacheLength** | Define prepare LRU cache length. 0 means no cache |*int*| 256 |
+
+new Connection methods
+* [`connection.prepare(sql) → Promise`](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/master/documentation/promise-api.md#connectionpreparesql---promise): Prepares a query.
+* [`connection.execute(sql[, values]) → Promise`](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/master/documentation/promise-api.md#connectionexecutesql-values--promise): Prepare and Executes a query.
+
+This methods are compatible with mysql2 with some differences:
+* permit streaming parameters
+* execute use by default a prepared cache that hasn't infinite length.
+* implement mariadb 10.6 skipping metadata when possible for better performance
+* Doesn't have a unprepare methods.
+
+## [2.5.5](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/2.5.5) (19 Oct 2021)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/2.5.4...2.5.5)
+
+* [CONJS-170] Pool.query(undefined) never release connection
+* [CONJS-173] not permitting providing null as a value without an array
+* [CONJS-175] Missing leakDetectionTimeout option in Typescript description
+
 ## [2.5.4](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/2.5.4) (08 Jun 2021)
 [Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/2.5.3...2.5.4)
 

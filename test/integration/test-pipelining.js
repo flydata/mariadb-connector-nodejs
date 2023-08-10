@@ -2,16 +2,14 @@
 
 const base = require('../base.js');
 const { assert } = require('chai');
+const { isXpand } = require('../base');
 
 describe('pipelining', () => {
   let conn1, conn2;
   const iterations = 500;
 
   before(function (done) {
-    Promise.all([
-      base.createConnection({ pipelining: false }),
-      base.createConnection({ pipelining: true })
-    ])
+    Promise.all([base.createConnection({ pipelining: false }), base.createConnection({ pipelining: true })])
       .then((connections) => {
         conn1 = connections[0];
         conn2 = connections[1];
@@ -33,12 +31,13 @@ describe('pipelining', () => {
   });
 
   it('simple query chain no pipelining', function (done) {
+    if (isXpand()) this.skip();
     conn1
       .query('DO 1')
       .then((rows) => {
         assert.deepEqual(rows, {
           affectedRows: 0,
-          insertId: 0,
+          insertId: 0n,
           warningStatus: 0
         });
         return conn1.query('DO 2');
@@ -46,7 +45,7 @@ describe('pipelining', () => {
       .then((rows) => {
         assert.deepEqual(rows, {
           affectedRows: 0,
-          insertId: 0,
+          insertId: 0n,
           warningStatus: 0
         });
         done();
@@ -55,23 +54,33 @@ describe('pipelining', () => {
   });
 
   it('pipelining without waiting for connect', function (done) {
-    const conn = base.createCallbackConnection();
+    const conn = base.createCallbackConnection({ pipelining: true });
     conn.connect((err) => {});
-    conn.query('DO 1');
-    conn.query('SELECT 1', (err, rows) => {
-      assert.deepEqual(rows, [{ 1: 1 }]);
+    conn.query("SELECT '1'", (err, rows) => {
+      assert.deepEqual(rows, [{ 1: '1' }]);
+    });
+    conn.query("SELECT '2'", (err, rows) => {
+      assert.deepEqual(rows, [{ 2: '2' }]);
+      conn.end();
+      done();
+    });
+  });
+
+  it('no pipelining without waiting for connect', function (done) {
+    const conn = base.createCallbackConnection({ pipelining: false });
+    conn.connect((err) => {});
+    conn.query("SELECT '1'", (err, rows) => {
+      assert.deepEqual(rows, [{ 1: '1' }]);
+    });
+    conn.query("SELECT '2'", (err, rows) => {
+      assert.deepEqual(rows, [{ 2: '2' }]);
       conn.end();
       done();
     });
   });
 
   it('500 insert test speed', function (done) {
-    if (
-      process.env.srv === 'maxscale' ||
-      process.env.srv === 'skysql' ||
-      process.env.srv === 'skysql-ha'
-    )
-      this.skip();
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     this.timeout(60000);
     let diff, pipelineDiff;
     conn1
@@ -97,10 +106,7 @@ describe('pipelining', () => {
         if (shareConn.info.hasMinVersion(10, 2, 0)) {
           //before 10.1, speed is sometime nearly equivalent using pipelining or not
           //remove speed test then to avoid random error in CIs
-          if (
-            diff[0] < pipelineDiff[0] ||
-            (diff[0] === pipelineDiff[0] && diff[1] < pipelineDiff[1])
-          ) {
+          if (diff[0] < pipelineDiff[0] || (diff[0] === pipelineDiff[0] && diff[1] < pipelineDiff[1])) {
             console.log(
               'time to insert 1000 : std=' +
                 Math.floor(diff[0] * 1000 + diff[1] / 1000000) +

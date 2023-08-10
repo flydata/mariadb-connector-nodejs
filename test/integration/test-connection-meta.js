@@ -10,10 +10,13 @@ describe('Connection meta', function () {
       if (
         process.env.srv !== 'skysql' &&
         process.env.srv !== 'skysql-ha' &&
-        process.env.srv !== 'maxscale'
+        process.env.srv !== 'maxscale' &&
+        process.env.srv !== 'xpand'
       ) {
         const version = process.env.v;
-        assert(serverVersion.startsWith(version), serverVersion + '/' + version);
+        if (version) {
+          assert(serverVersion.startsWith(version), serverVersion + '/' + version);
+        }
       }
     }
   });
@@ -24,10 +27,8 @@ describe('Connection meta', function () {
       conn.serverVersion();
       done(new Error('Must have thrown exception'));
     } catch (err) {
-      assert(
-        err.message.includes('cannot know if server information until connection is established')
-      );
-      conn.connect(conn.end);
+      assert(err.message.includes('cannot know if server information until connection is established'));
+      conn.connect(conn.end.bind(conn));
       done();
     }
   });
@@ -45,10 +46,8 @@ describe('Connection meta', function () {
       conn.info.isMariaDB();
       done(new Error('Must have thrown exception'));
     } catch (err) {
-      assert(
-        err.message.includes('cannot know if server is MariaDB until connection is established')
-      );
-      conn.connect(conn.end);
+      assert(err.message.includes('cannot know if server is MariaDB until connection is established'));
+      conn.connect(conn.end.bind(conn));
       done();
     }
   });
@@ -60,7 +59,7 @@ describe('Connection meta', function () {
       done(new Error('Must have thrown exception'));
     } catch (err) {
       assert(err.message.includes('cannot know if server version until connection is established'));
-      conn.connect(conn.end);
+      conn.connect(conn.end.bind(conn));
       done();
     }
   });

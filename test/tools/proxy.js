@@ -1,16 +1,30 @@
 const net = require('net');
 
 function Proxy(args) {
-  let localPort = -1;
   const REMOTE_PORT = args.port;
   const REMOTE_ADDR = args.host;
+  const sockets = [];
+  const remoteSockets = [];
+
+  let localPort = -1;
   let log = args.log || false;
   let server;
-  let remoteSocket;
   let stop = false;
+  let stopRemote = false;
 
   this.close = () => {
-    if (server) server.close();
+    server.close();
+    sockets.forEach((socket) => {
+      socket.destroy();
+    });
+    sockets.length = 0;
+
+    remoteSockets.forEach((socket) => {
+      socket.destroy();
+    });
+    remoteSockets.length = 0;
+
+    stop = true;
   };
 
   this.port = () => {
@@ -18,7 +32,6 @@ function Proxy(args) {
   };
 
   this.stop = () => {
-    server.close();
     stop = true;
   };
 
@@ -32,108 +45,93 @@ function Proxy(args) {
 
   this.resume = () => {
     stop = false;
-    server.listen(localPort);
+    return new Promise(function (resolver, rejecter) {
+      try {
+        server.listen(localPort, resolver);
+      } catch (e) {
+        if (e.code !== 'ERR_SERVER_ALREADY_LISTEN') {
+          rejecter(e);
+        }
+      }
+    });
   };
 
   this.start = () => {
-    const sockets = [];
-    const remoteSockets = [];
-    let stopRemote = false;
-
-    server = net.createServer((socket) => {
-      let ended = false;
-      sockets.push(socket);
-      if (stop) {
-        process.nextTick(socket.destroy.bind(socket));
-      } else {
-        if (log) console.log('  ** START **');
-        remoteSocket = new net.Socket();
-        remoteSocket.connect(REMOTE_PORT, REMOTE_ADDR, function () {});
-        remoteSockets.push(remoteSocket);
-        if (stopRemote) remoteSocket.pause();
-
-        remoteSocket.on('data', function (data) {
-          if (log) console.log('<< ', data.toString());
-          socket.write(data);
+    return new Promise(function (resolver, rejecter) {
+      server = net.createServer({ noDelay: true }, (from) => {
+        sockets.push(from);
+        let ended = false;
+        let to = net.createConnection({
+          host: REMOTE_ADDR,
+          port: REMOTE_PORT
         });
+        remoteSockets.push(to);
+        if (stopRemote) to.pause();
 
-        remoteSocket.on('end', function () {
-          if (log) console.log('<< remote end (' + ended + ')');
-          if (!ended) socket.end();
-          ended = true;
-        });
-
-        remoteSocket.on('error', function (err) {
-          if (log) console.log('<< remote error (' + ended + ')');
-          if (!ended) socket.destroy(err);
-          ended = true;
-        });
-
-        socket.on('error', function (err) {
-          if (log) console.log('>> socket error (' + ended + ')');
-          if (!ended) remoteSocket.destroy(err);
-          ended = true;
-        });
-
-        socket.on('data', function (msg) {
+        from.on('data', function (msg) {
           if (!stop) {
-            remoteSocket.write(msg);
+            to.write(msg);
             if (log) console.log('>> ', msg.toString());
           }
         });
 
-        socket.on('end', () => {
-          if (log) console.log('>> localsocket end (' + ended + ')');
-          if (!ended) remoteSocket.end();
+        to.on('data', function (msg) {
+          if (!stop) {
+            from.write(msg);
+            if (log) console.log('<< ', msg.toString());
+          }
+        });
+
+        to.on('connect', () => {
+          if (stopRemote) to.pause();
+        });
+
+        to.on('end', function () {
+          if (log) console.log('<< remote end (' + ended + ')');
+          if (!ended) from.end();
           ended = true;
         });
-      }
-    });
-    server.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.log('Address in use, retrying...');
-        setTimeout(() => {
-          server.close();
-          server.listen();
-          localPort = server.address().port;
-        }, 1000);
-      } else {
-        if (log) console.log('proxy server error : ' + err);
-        throw err;
-      }
-    });
 
-    server.on('close', () => {
-      if (log) console.log('closing proxy server');
-      sockets.forEach((socket) => {
-        if (socket) socket.destroy();
+        from.on('end', () => {
+          if (log) console.log('>> localsocket end (' + ended + ':' + from.address().port + ')');
+          if (!ended) to.end();
+          ended = true;
+        });
+      });
+
+      server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          console.log('Address in use, retrying...');
+          setTimeout(() => {
+            server.close();
+            server.listen();
+            localPort = server.address().port;
+          }, 1000);
+        } else {
+          if (log) console.log('proxy server error : ' + err);
+          throw err;
+        }
+      });
+
+      server.on('suspendRemote', () => {
+        if (log) console.log('suspend proxy server');
+        remoteSockets.forEach((socket) => socket.pause());
+        stopRemote = true;
+      });
+
+      server.on('resumeRemote', () => {
+        if (log) console.log('resume proxy server');
+        remoteSockets.forEach((socket) => socket.resume());
+        stopRemote = false;
+      });
+
+      server.listen(() => {
+        localPort = server.address().port;
+        if (log) console.log('TCP server accepting connection on port: ' + localPort);
+        resolver();
       });
     });
-
-    server.on('suspendRemote', () => {
-      if (log) console.log('suspend proxy server');
-      remoteSockets.forEach((socket) => {
-        if (socket) socket.pause();
-      });
-      stopRemote = true;
-    });
-
-    server.on('resumeRemote', () => {
-      if (log) console.log('resume proxy server');
-      remoteSockets.forEach((socket) => {
-        if (socket) socket.resume();
-      });
-      stopRemote = false;
-    });
-
-    server.listen();
-
-    localPort = server.address().port;
-
-    if (log) console.log('TCP server accepting connection on port: ' + localPort);
   };
-
-  this.start();
 }
 
 module.exports = Proxy;

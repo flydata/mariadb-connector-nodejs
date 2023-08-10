@@ -2,6 +2,7 @@
 
 const base = require('../base.js');
 const { assert } = require('chai');
+const { isXpand } = require('../base');
 
 describe('sql template strings', () => {
   const value = "'`\\";
@@ -57,34 +58,31 @@ describe('sql template strings', () => {
                 done(err);
               } else {
                 conn.beginTransaction(() => {
-                  conn.query(
-                    { sql: 'INSERT INTO callback_with_parameters value (?)', values: [value] },
-                    (err) => {
-                      if (err) {
-                        conn.end();
-                        done(err);
-                      } else {
-                        conn.query(
-                          {
-                            sql: 'select * from callback_with_parameters where t = ?',
-                            values: [value]
-                          },
-                          (err, res) => {
-                            if (err) {
-                              conn.end(() => {
-                                done(err);
-                              });
-                            } else {
-                              assert.strictEqual(res[0].t, value);
-                              conn.end(() => {
-                                done();
-                              });
-                            }
+                  conn.query({ sql: 'INSERT INTO callback_with_parameters value (?)', values: [value] }, (err) => {
+                    if (err) {
+                      conn.end();
+                      done(err);
+                    } else {
+                      conn.query(
+                        {
+                          sql: 'select * from callback_with_parameters where t = ?',
+                          values: [value]
+                        },
+                        (err, res) => {
+                          if (err) {
+                            conn.end(() => {
+                              done(err);
+                            });
+                          } else {
+                            assert.strictEqual(res[0].t, value);
+                            conn.end(() => {
+                              done();
+                            });
                           }
-                        );
-                      }
+                        }
+                      );
                     }
-                  );
+                  });
                 });
               }
             });
@@ -151,7 +149,8 @@ describe('sql template strings', () => {
     });
   });
 
-  it('pool query with parameters', (done) => {
+  it('pool query with parameters', function (done) {
+    if (process.env.srv === 'maxscale' && process.env.srv === 'skysql-ha') this.skip;
     const pool = base.createPool();
     pool
       .query('drop table IF EXISTS pool_query_param')
@@ -179,7 +178,8 @@ describe('sql template strings', () => {
   });
 
   it('pool batch with parameters', (done) => {
-    const pool = base.createPool();
+    let params = {};
+    const pool = base.createPool(params);
     pool
       .query('DROP TABLE IF EXISTS pool_parse_batch')
       .then(() => {
@@ -208,53 +208,42 @@ describe('sql template strings', () => {
     const pool = base.createPoolCallback();
     pool.query('drop table IF EXISTS pool_parse_call', (err, res) => {
       pool.query('CREATE TABLE pool_parse_call(t varchar(128))', (err, res) => {
-        pool.query(
-          { sql: 'INSERT INTO pool_parse_call value (?)', values: [value] },
-          (err, res) => {
-            pool.query(
-              { sql: 'select * from pool_parse_call where t = ?', values: [value] },
-              (err, res) => {
-                if (err) {
-                  pool.end();
-                  done(err);
-                } else {
-                  assert.strictEqual(res[0].t, value);
-                  pool.query('drop table pool_parse_call', () => {
-                    pool.end();
-                    done();
-                  });
-                }
-              }
-            );
-          }
-        );
+        pool.query({ sql: 'INSERT INTO pool_parse_call value (?)', values: [value] }, (err, res) => {
+          pool.query({ sql: 'select * from pool_parse_call where t = ?', values: [value] }, (err, res) => {
+            if (err) {
+              pool.end();
+              done(err);
+            } else {
+              assert.strictEqual(res[0].t, value);
+              pool.query('drop table pool_parse_call', () => {
+                pool.end();
+                done();
+              });
+            }
+          });
+        });
       });
     });
   });
 
   it('pool callback batch with parameters', (done) => {
-    const pool = base.createPoolCallback();
+    let params = {};
+    const pool = base.createPoolCallback(params);
     pool.query('drop table pool_batch_call', (err) => {
       pool.query('CREATE TABLE pool_batch_call(t varchar(128))', (err, res) => {
-        pool.batch(
-          { sql: 'INSERT INTO pool_batch_call value (?)', values: [value] },
-          (err, res) => {
-            pool.query(
-              { sql: 'select * from pool_batch_call where t = ?', values: [value] },
-              (err, res) => {
-                if (err) {
-                  done(err);
-                } else {
-                  assert.strictEqual(res[0].t, value);
-                  pool.query('drop table pool_batch_call', () => {
-                    pool.end();
-                    done();
-                  });
-                }
-              }
-            );
-          }
-        );
+        pool.batch({ sql: 'INSERT INTO pool_batch_call value (?)', values: [value] }, (err, res) => {
+          pool.query({ sql: 'select * from pool_batch_call where t = ?', values: [value] }, (err, res) => {
+            if (err) {
+              done(err);
+            } else {
+              assert.strictEqual(res[0].t, value);
+              pool.query('drop table pool_batch_call', () => {
+                pool.end();
+                done();
+              });
+            }
+          });
+        });
       });
     });
   });

@@ -2,6 +2,7 @@
 
 const base = require('../base.js');
 const { assert } = require('chai');
+const { isXpand } = require('../base');
 
 describe('basic query', () => {
   it('query with value without placeholder', function (done) {
@@ -9,15 +10,46 @@ describe('basic query', () => {
       .createConnection()
       .then((conn) => {
         conn
-          .query('select 1', [2])
+          .query("select '1'", [2])
           .then((rows) => {
-            assert.deepEqual(rows, [{ 1: 1 }]);
+            assert.deepEqual(rows, [{ 1: '1' }]);
             conn.end();
             done();
           })
           .catch(done);
       })
       .catch(done);
+  });
+
+  it('query with null placeholder', async function () {
+    let rows = await shareConn.query('select ? as a', [null]);
+    assert.deepEqual(rows, [{ a: null }]);
+  });
+
+  it('query with null placeholder no array', async function () {
+    let rows = await shareConn.query('select ? as a', null);
+    assert.deepEqual(rows, [{ a: null }]);
+  });
+
+  it('query metaEnumerable', async function () {
+    let rows = await shareConn.query({ sql: 'select ? as a', metaEnumerable: false }, null);
+    assert.equal(rows.meta.length, 1);
+    assert.equal(JSON.stringify(rows), '[{"a":null}]');
+    assert.deepStrictEqual(rows, [{ a: null }]);
+    let nb = 0;
+    for (var propertyName in rows) {
+      nb++;
+    }
+    assert.equal(nb, 1);
+
+    rows = await shareConn.query({ sql: 'select ? as a', metaEnumerable: true }, null);
+    assert.equal(rows.meta.length, 1);
+
+    nb = 0;
+    for (var propertyName in rows) {
+      nb++;
+    }
+    assert.equal(nb, 2);
   });
 
   it('parameter last', async () => {
@@ -32,13 +64,45 @@ describe('basic query', () => {
     conn.end();
   });
 
+  it('query stack trace', function (done) {
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    const conn = base.createCallbackConnection({ trace: true });
+    conn.connect((err) => {
+      conn.query('wrong query', (err) => {
+        if (!err) {
+          done(Error('must have thrown error !'));
+        } else {
+          assert.isTrue(err.stack.includes('test-query.js:'), err.stack);
+          conn.end();
+          done();
+        }
+      });
+    });
+  });
+
+  it('query parameter error stack trace', function (done) {
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    const conn = base.createCallbackConnection({ trace: true });
+    conn.connect((err) => {
+      conn.query('SELECT ?', [], (err) => {
+        if (!err) {
+          done(Error('must have thrown error !'));
+        } else {
+          assert.isTrue(err.stack.includes('test-query.js:'), err.stack);
+          conn.end();
+          done();
+        }
+      });
+    });
+  });
+
   it('array parameter', async function () {
     const conn = await base.createConnection();
     await conn.query('DROP TABLE IF EXISTS arrayParam');
     await conn.query('CREATE TABLE arrayParam (id int, val varchar(10))');
     await conn.beginTransaction();
     await conn.query("INSERT INTO arrayParam VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
-    const rows = await conn.query('SELECT * FROM arrayParam WHERE val IN (?)', [['b', 'c', 1]]);
+    const rows = await conn.query('SELECT * FROM arrayParam WHERE val IN (?)', [['b', 'c', '1']]);
     assert.deepEqual(rows, [
       {
         id: 2,
@@ -50,6 +114,27 @@ describe('basic query', () => {
       }
     ]);
     conn.end();
+  });
+
+  it('array parameter test', async function () {
+    const conn = await base.createConnection();
+    await conn.query('DROP TABLE IF EXISTS testArrayParameter');
+    await conn.query('CREATE TABLE testArrayParameter (val1 int, val2 int)');
+    await conn.query('INSERT INTO testArrayParameter VALUES (1,1), (1,2), (1,3), (2,2)');
+
+    const query = 'SELECT * FROM testArrayParameter WHERE val1 = ? AND val2 IN (?)';
+    const res = await conn.query(query, [1, [1, 3]]);
+    assert.deepEqual(res, [
+      {
+        val1: 1,
+        val2: 1
+      },
+      {
+        val1: 1,
+        val2: 3
+      }
+    ]);
+    await conn.end();
   });
 
   it('array parameter with null value', async function () {
@@ -141,11 +226,11 @@ describe('basic query', () => {
       .createConnection()
       .then((conn) => {
         conn
-          .query('select /* blabla */ 1 -- test comment\n , ?', ['val'])
+          .query("select /* blabla */ '1' -- test comment\n , ?", ['val'])
           .then((rows) => {
             assert.deepEqual(rows, [
               {
-                1: 1,
+                1: '1',
                 val: 'val'
               }
             ]);
@@ -162,11 +247,11 @@ describe('basic query', () => {
       .createConnection()
       .then((conn) => {
         conn
-          .query('select /* blabla */ 1 # test comment\n , ?', ['val'])
+          .query("select /* blabla */ '1' # test comment\n , ?", ['val'])
           .then((rows) => {
             assert.deepEqual(rows, [
               {
-                1: 1,
+                1: '1',
                 val: 'val'
               }
             ]);
@@ -179,15 +264,14 @@ describe('basic query', () => {
   });
 
   it('query warning', function (done) {
+    if (isXpand()) this.skip();
     //mysql 8 force truncation as error, even with SQL_MODE disable it.
     if (!shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(8, 0, 0)) this.skip();
     base
       .createConnection()
       .then((conn) => {
         conn
-          .query(
-            "set @@SQL_MODE = 'ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'"
-          )
+          .query("set @@SQL_MODE = 'ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'")
           .then(() => {
             return conn.query('DROP TABLE IF EXISTS h');
           })
@@ -210,7 +294,9 @@ describe('basic query', () => {
       .catch(done);
   });
 
-  it('255 columns', async () => {
+  it('255 columns', async function () {
+    // skip for Xpand, limited by max_columns
+    if (isXpand()) this.skip();
     let table = 'CREATE TABLE myTable(';
     let insert = 'INSERT INTO myTable VALUES (';
     let expRes = {};
@@ -260,10 +346,7 @@ describe('basic query', () => {
     };
 
     base.createConnection({ permitSetMultiParamEntries: true }).then((conn) => {
-      assert.equal(
-        conn.escape(arr),
-        "`stg`='let\\'g\\'o😊',`bool`=false,`nullVal`=NULL,`fctSt`='bla\\'bla'"
-      );
+      assert.equal(conn.escape(arr), "`stg`='let\\'g\\'o😊',`bool`=false,`nullVal`=NULL,`fctSt`='bla\\'bla'");
       conn.end();
       base.createConnection({ permitSetMultiParamEntries: false }).then((conn2) => {
         assert.equal(
@@ -277,6 +360,8 @@ describe('basic query', () => {
   });
 
   it('timeout', function (done) {
+    // xpand doesn't support timeout
+    if (isXpand()) this.skip();
     this.timeout(20000);
     const initTime = Date.now();
     const query =
@@ -291,6 +376,8 @@ describe('basic query', () => {
   });
 
   it('timeout with parameter', function (done) {
+    // xpand doesn't support timeout
+    if (isXpand()) this.skip();
     this.timeout(20000);
     const initTime = Date.now();
     const query =
@@ -308,19 +395,13 @@ describe('basic query', () => {
     if (shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(10, 1, 2)) {
       const elapse = Date.now() - initTime;
       assert.isOk(elapse < 10000, 'elapse time was ' + elapse + ' but must be less around 100');
-      assert.isTrue(
-        err.message.includes('Query execution was interrupted (max_statement_time exceeded)')
-      );
+      assert.isTrue(err.message.includes('Query execution was interrupted (max_statement_time exceeded)'));
       assert.equal(err.errno, 1969);
       assert.equal(err.sqlState, 70100);
       assert.equal(err.code, 'ER_STATEMENT_TIMEOUT');
     } else {
       if (shareConn.info.isMariaDB()) {
-        assert.isTrue(
-          err.message.includes(
-            'Cannot use timeout for MariaDB server before 10.1.2. timeout value:'
-          )
-        );
+        assert.isTrue(err.message.includes('Cannot use timeout for MariaDB server before 10.1.2. timeout value:'));
       } else {
         assert.isTrue(err.message.includes('Cannot use timeout for MySQL server. timeout value:'));
       }

@@ -1,237 +1,350 @@
-# Benchmark 
+# Benchmark
 
-Benchmarks for the MariaDB Node.js Connector are done using the [benchmark](https://www.npmjs.com/package/benchmark) package.   You can find the source code for our benchmarks in the [`benchmarks/`](../benchmarks) folder.
+Benchmarks for the MariaDB Node.js Connector are done using the [benchmark](https://www.npmjs.com/package/benchmark) package. You can find the source code for our benchmarks in the [`benchmarks/`](../benchmarks) folder.
 
 You can run benchmarks using npm.  To run it on the `mariadb` Connector only, use the following command:
 
 ```
+$ npm install microtime
 $ npm run benchmark
 ```
 
-Npm runs a series on the MariaDB Server then returns the execution times.  While this may give you a rough idea of how it performs, it's better to compare to other MySQL connector packages, like [mysql](https://www.npmjs.com/package/mysql) and [mysql2](https://www.npmjs.com/package/mysql2) packages. 
+Npm runs a series on the MariaDB Server then returns the execution times.  
+While this may give you a rough idea of how it performs, it's better to compare to other MySQL connector packages, like [mysql](https://www.npmjs.com/package/mysql) and [mysql2](https://www.npmjs.com/package/mysql2) packages.
 
-Install them, then re-run the benchmarks:
 
+The [mysql](https://www.npmjs.com/package/mysql) package doesn't implement Promise, so using use the [promise-mysql](https://www.npmjs.com/package/promise-mysql) package.
+
+run the benchmarks:
 ```
-$ npm install mysql mysql2
-$ npm run benchmark
-``` 
-
-The [mysql](https://www.npmjs.com/package/mysql) package doesn't implement Promise.  If you need to test Promise, use the [promise-mysql](https://www.npmjs.com/package/promise-mysql) package.
-
-```
+$ npm install microtime
 $ npm install mysql mysql2 promise-mysql
 $ npm run benchmark
 ```
 
 ## Results
 
-Benchmarks were run on two Digital Ocean hosts with 8GB of memory and 4 virtual CPU's, running Ubuntu 18.04.
+Benchmarks runs on two Digital Ocean hosts with 16GB of memory and 4 CPU's, running Ubuntu 22.04.
 
-* **Server Host**: MariaDB 10.4 under the default configuration with the [`collation_server`](https://mariadb.com/kb/en/library/server-system-variables#collation_server)system variable set to `utf8mb4_unicode_ci` and the [`character_set_server`](https://mariadb.com/kb/en/library/server-system-variables#character_set_server) system variable set to `utf8mb4`.
-* **Client Host**: Node.js version v10.16.0
+* **Server Host**: MariaDB 10.6 under the default configuration, just commenting bind-address to permit access from other server.
+* **Client Host**: Node.js version v18.13.0
+  (change the ./test/conf.js to set connection information)
 
-The MariaDB Node.js Connector was then tested along side the following MySQL connectors:
+The MariaDB Node.js Connector was then tested alongside the following MySQL connectors:
 
-* [**mysql**](https://www.npmjs.com/package/mysql): version 2.17.1
-* [**mysql2**](https://www.npmjs.com/package/mysql2): version 1.6.5
-* [**promise-mysql**](https://www.npmjs.com/package/promise-mysql): version 3.1.1
+* [**mysql**](https://www.npmjs.com/package/mysql): version 2.18.1 
+* [**mysql2**](https://www.npmjs.com/package/mysql2): version 3.1.0
+* [**promise-mysql**](https://www.npmjs.com/package/promise-mysql): version 5.2.0
 
-``` 
-
-> mariadb@2.1.0 benchmark /root/mariadb-connector-nodejs
-> node ./benchmarks/benchmarks.js
-
-{ user: 'root',
-  database: 'testn',
-  host: '167.71.37.131',
-  connectTimeout: 1000,
-  port: 3306,
-  charsetNumber: 224,
-  trace: false,
-  noControlAfterUse: true }
-Ignoring invalid configuration option passed to Connection: noControlAfterUse. This is currently a warning, but in future versions of MySQL2, an error will be thrown if you pass an invalid configuration options to a Connection
-Ignoring invalid configuration option passed to Connection: noControlAfterUse. This is currently a warning, but in future versions of MySQL2, an error will be thrown if you pass an invalid configuration options to a Connection
-benchmark: ./benchs/bench_do.js
-benchmark: ./benchs/bench_promise_do.js
-benchmark: ./benchs/bench_promise_insert.js
-benchmark: ./benchs/bench_promise_insert_batch.js
-benchmark: ./benchs/bench_promise_insert_pipelining.js
-benchmark: ./benchs/bench_promise_select_collation.js
-benchmark: ./benchs/bench_promise_select_one_user.js
-benchmark: ./benchs/bench_promise_select_one_user_random.js
-benchmark: ./benchs/bench_promise_select_param.js
-benchmark: ./benchs/bench_promise_select_random_param.js
-benchmark: ./benchs/bench_promise_select_random_param_pool.js
-benchmark: ./benchs/bench_select_one_user.js
-benchmark: ./benchs/bench_select_one_user_random.js
-benchmark: ./benchs/bench_select_param.js
-benchmark: ./benchs/bench_select_random_param.js
-driver for mysql connected (1/6)
-driver for mysql2 connected (2/6)
-Ignoring invalid configuration option passed to Connection: noControlAfterUse. This is currently a warning, but in future versions of MySQL2, an error will be thrown if you pass an invalid configuration options to a Connection
-driver for promise mysql2 connected (3/6)
-driver for mariadb connected (4/6)
-driver for promise-mariadb connected (5/6)
-driver for promise-mysql connected (6/6)
-start : init test : 15
-initializing test data 1/15
-initializing test data 2/15
-initializing test data 3/15
-initializing test data 4/15
-initializing test data 5/15
-initializing test data 6/15
-initializing test data 7/15
-initializing test data 8/15
-initializing test data 9/15
-initializing test data 10/15
-initializing test data 11/15
-initializing test data 12/15
-initializing test data 13/15
-initializing test data 14/15
-initializing test data 15/15
-initializing test data done
-do ? using callback - warmup x 6,099 ops/sec ±2.63% (269 runs sampled)
-do ? using callback - mysql x 6,137 ops/sec ±2.45% (270 runs sampled)
-do ? using callback - mysql2 x 6,109 ops/sec ±2.65% (263 runs sampled)
-do ? using callback - mariadb x 6,266 ops/sec ±2.47% (268 runs sampled)
-do ? using promise - warmup x 6,583 ops/sec ±2.36% (267 runs sampled)
-do ? using promise - promise-mysql x 5,569 ops/sec ±2.44% (267 runs sampled)
-do ? using promise - promise mysql2 x 5,517 ops/sec ±2.02% (269 runs sampled)
-do ? using promise - promise mariadb x 6,426 ops/sec ±2.43% (270 runs sampled)
-insert 10 parameters of 100 characters using promise - warmup x 3,736 ops/sec ±1.43% (268 runs sampled)
-insert 10 parameters of 100 characters using promise - promise-mysql x 3,458 ops/sec ±1.49% (267 runs sampled)
-insert 10 parameters of 100 characters using promise - promise mysql2 x 3,332 ops/sec ±1.37% (266 runs sampled)
-insert 10 parameters of 100 characters using promise - promise mariadb x 3,687 ops/sec ±1.35% (266 runs sampled)
-100 * insert 100 characters using promise and batch method (for mariadb only, since doesn't exist for others) - warmup x 1,466 ops/sec ±4.49% (255 runs sampled)
-100 * insert 100 characters using promise and batch method (for mariadb only, since doesn't exist for others) - promise-mysql x 48.56 ops/sec ±1.56% (256 runs sampled)
-100 * insert 100 characters using promise and batch method (for mariadb only, since doesn't exist for others) - promise mysql2 x 44.77 ops/sec ±1.63% (264 runs sampled)
-100 * insert 100 characters using promise and batch method (for mariadb only, since doesn't exist for others) - promise mariadb x 1,448 ops/sec ±5.76% (256 runs sampled)
-100 * insert 100 characters using promise - warmup x 195 ops/sec ±2.84% (261 runs sampled)
-100 * insert 100 characters using promise - promise-mysql x 47.12 ops/sec ±1.85% (254 runs sampled)
-100 * insert 100 characters using promise - promise mysql2 x 42.39 ops/sec ±1.65% (264 runs sampled)
-100 * insert 100 characters using promise - promise mariadb x 202 ops/sec ±2.78% (263 runs sampled)
-select multiple collation using promise - warmup x 537 ops/sec ±1.63% (258 runs sampled)
-select multiple collation using promise - promise-mysql x 418 ops/sec ±1.58% (259 runs sampled)
-select multiple collation using promise - promise mysql2 x 495 ops/sec ±1.67% (262 runs sampled)
-select multiple collation using promise - promise mariadb x 520 ops/sec ±1.52% (258 runs sampled)
-select one mysql.user and 1 integer using promise - warmup x 954 ops/sec ±2.98% (262 runs sampled)
-select one mysql.user and 1 integer using promise - promise-mysql x 646 ops/sec ±2.20% (251 runs sampled)
-select one mysql.user and 1 integer using promise - promise mysql2 x 746 ops/sec ±2.35% (257 runs sampled)
-select one mysql.user and 1 integer using promise - promise mariadb x 961 ops/sec ±2.82% (262 runs sampled)
-select one mysql.user and a random number (no caching client side) using promise - warmup x 981 ops/sec ±2.75% (264 runs sampled)
-select one mysql.user and a random number (no caching client side) using promise - promise-mysql x 597 ops/sec ±2.03% (256 runs sampled)
-select one mysql.user and a random number (no caching client side) using promise - promise mysql2 x 306 ops/sec ±1.89% (263 runs sampled)
-select one mysql.user and a random number (no caching client side) using promise - promise mariadb x 941 ops/sec ±2.90% (265 runs sampled)
-select number using promise - warmup x 5,777 ops/sec ±2.07% (265 runs sampled)
-select number using promise - promise-mysql x 4,868 ops/sec ±1.84% (267 runs sampled)
-select number using promise - promise mysql2 x 4,841 ops/sec ±1.60% (267 runs sampled)
-select number using promise - promise mariadb x 5,516 ops/sec ±1.96% (265 runs sampled)
-select random number using promise - warmup x 5,527 ops/sec ±2.29% (262 runs sampled)
-select random number using promise - promise-mysql x 4,843 ops/sec ±2.15% (267 runs sampled)
-select random number using promise - promise mysql2 x 4,696 ops/sec ±1.88% (261 runs sampled)
-select random number using promise - promise mariadb x 5,620 ops/sec ±1.98% (266 runs sampled)
-select random number using promise and pool - warmup x 3,782 ops/sec ±1.43% (265 runs sampled)
-select random number using promise and pool - promise-mysql x 1,738 ops/sec ±1.73% (258 runs sampled)
-select random number using promise and pool - promise mysql2 x 3,526 ops/sec ±1.78% (266 runs sampled)
-select random number using promise and pool - promise mariadb x 3,840 ops/sec ±1.69% (267 runs sampled)
-select one mysql.user and 1 integer using callback - warmup x 813 ops/sec ±2.48% (255 runs sampled)
-select one mysql.user and 1 integer using callback - mysql x 615 ops/sec ±2.15% (256 runs sampled)
-select one mysql.user and 1 integer using callback - mysql2 x 774 ops/sec ±2.31% (259 runs sampled)
-select one mysql.user and 1 integer using callback - mariadb x 821 ops/sec ±2.53% (263 runs sampled)
-select one mysql.user and a random number (no caching client side) using callback - warmup x 986 ops/sec ±2.78% (268 runs sampled)
-select one mysql.user and a random number (no caching client side) using callback - mysql x 641 ops/sec ±2.04% (258 runs sampled)
-select one mysql.user and a random number (no caching client side) using callback - mysql2 x 330 ops/sec ±1.88% (257 runs sampled)
-select one mysql.user and a random number (no caching client side) using callback - mariadb x 805 ops/sec ±2.33% (257 runs sampled)
-select number - warmup x 5,727 ops/sec ±1.94% (265 runs sampled)
-select number - mysql x 5,338 ops/sec ±2.02% (266 runs sampled)
-select number - mysql2 x 5,390 ops/sec ±2.08% (265 runs sampled)
-select number - mariadb x 5,608 ops/sec ±2.15% (265 runs sampled)
-select random number - warmup x 5,564 ops/sec ±1.85% (267 runs sampled)
-select random number - mysql x 5,193 ops/sec ±2.01% (268 runs sampled)
-select random number - mysql2 x 5,433 ops/sec ±2.26% (264 runs sampled)
-select random number - mariadb x 5,420 ops/sec ±1.97% (264 runs sampled)
-completed
-ending connectors
-
-
---- BENCHMARK RESULTS ---
-/* travis bench are not to take as is, because VM might run some other testing script that can change results */
-
-bench : do ? using callback ( sql: do ? )
-              mysql :  6,137.4 ops/s  
-             mysql2 :  6,109.2 ops/s   (   -0.5% )
-            mariadb :  6,266.1 ops/s   (   +2.1% )
-
-bench : do ? using promise ( sql: do ? )
-      promise-mysql :  5,569.4 ops/s  
-     promise mysql2 :  5,516.5 ops/s   (     -1% )
-    promise mariadb :  6,426.1 ops/s   (  +15.4% )
-
-bench : insert 10 parameters of 100 characters using promise ( sql: INSERT INTO testn.perfTestText VALUES (<100 ?>) (into BLACKHOLE ENGINE) )
-      promise-mysql :  3,457.8 ops/s  
-     promise mysql2 :    3,332 ops/s   (   -3.6% )
-    promise mariadb :  3,686.9 ops/s   (   +6.6% )
-
-bench : 100 * insert 100 characters using promise and batch method (for mariadb only, since doesn't exist for others) ( sql: INSERT INTO testn.perfTestTextPipe VALUES (?) (into BLACKHOLE ENGINE) )
-      promise-mysql :     48.6 ops/s  
-     promise mysql2 :     44.8 ops/s   (   -7.8% )
-    promise mariadb :  1,447.6 ops/s   ( +2,881.3% )
-
-bench : 100 * insert 100 characters using promise ( sql: INSERT INTO testn.perfTestTextPipe VALUES (?) (into BLACKHOLE ENGINE) )
-      promise-mysql :     47.1 ops/s  
-     promise mysql2 :     42.4 ops/s   (  -10.1% )
-    promise mariadb :    202.4 ops/s   ( +329.6% )
-
-bench : select multiple collation using promise ( sql: select * from information_schema.COLLATIONS )
-      promise-mysql :    417.8 ops/s  
-     promise mysql2 :      495 ops/s   (  +18.5% )
-    promise mariadb :    519.7 ops/s   (  +24.4% )
-
-bench : select one mysql.user and 1 integer using promise ( sql: select <all mysql.user fields>, 1 from mysql.user u LIMIT 1 )
-      promise-mysql :      646 ops/s  
-     promise mysql2 :    746.1 ops/s   (  +15.5% )
-    promise mariadb :    961.4 ops/s   (  +48.8% )
-
-bench : select one mysql.user and a random number (no caching client side) using promise ( sql: select <all mysql.user fields>, <random field> from mysql.user u LIMIT 1 )
-      promise-mysql :      597 ops/s  
-     promise mysql2 :    305.9 ops/s   (  -48.8% )
-    promise mariadb :    941.3 ops/s   (  +57.7% )
-
-bench : select number using promise ( sql: select 10000000 )
-      promise-mysql :  4,868.4 ops/s  
-     promise mysql2 :  4,841.1 ops/s   (   -0.6% )
-    promise mariadb :  5,516.1 ops/s   (  +13.3% )
-
-bench : select random number using promise ( sql: select ? )
-      promise-mysql :  4,842.8 ops/s  
-     promise mysql2 :  4,696.2 ops/s   (     -3% )
-    promise mariadb :  5,620.2 ops/s   (  +16.1% )
-
-bench : select random number using promise and pool ( sql: select ? )
-      promise-mysql :  1,738.5 ops/s  
-     promise mysql2 :  3,526.3 ops/s   ( +102.8% )
-    promise mariadb :  3,839.9 ops/s   ( +120.9% )
-
-bench : select one mysql.user and 1 integer using callback ( sql: select <all mysql.user fields>, 1 from mysql.user u LIMIT 1 )
-              mysql :    614.6 ops/s  
-             mysql2 :    774.2 ops/s   (    +26% )
-            mariadb :    821.1 ops/s   (  +33.6% )
-
-bench : select one mysql.user and a random number (no caching client side) using callback ( sql: select <all mysql.user fields>, <random field> from mysql.user u LIMIT 1 )
-              mysql :    641.2 ops/s  
-             mysql2 :      330 ops/s   (  -48.5% )
-            mariadb :    804.7 ops/s   (  +25.5% )
-
-bench : select number ( sql: select ? )
-              mysql :  5,337.5 ops/s  
-             mysql2 :  5,390.3 ops/s   (     +1% )
-            mariadb :  5,608.3 ops/s   (   +5.1% )
-
-bench : select random number ( sql: select ? )
-              mysql :  5,193.2 ops/s  
-             mysql2 :  5,432.9 ops/s   (   +4.6% )
-            mariadb :  5,419.8 ops/s   (   +4.4% )
+in order to have stable results, environment variable PERF_SAMPLES is set to 500:
+```
+set PERF_SAMPLES=500
 ```
 
-Note, the [mysql2](https://www.npmjs.com/package/mysql2) package uses metadata client caching, so queries with metadata in cache are faster than new queries.
+### distant server
+
+root@ubuntu-g-4vcpu-16gb-sfo3-cli:~/mariadb-connector-nodejs# npm run benchmark
+
+> mariadb@3.1.0 benchmark
+> node benchmarks/benchmarks-all.js
+
+{
+user: 'root',
+database: 'testn',
+host: '137.184.6.237',
+connectTimeout: 2000,
+port: 3306,
+charset: 'utf8mb4',
+trace: false
+}
+##  do 1
+
+```
+do 1
+            mysql :  7,063.6 ops/s ± 0.4% 
+           mysql2 :  6,465.3 ops/s ± 0.6%  (   -8.5% )
+          mariadb :  8,531.9 ops/s ± 0.3%  (  +20.8% )
+```
+![do 1 benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=7064&data2=6465&data3=8532)
+
+##  do 1000 parameter
+
+```
+do 1000 parameter
+            mysql :  2,410.3 ops/s ± 0.3% 
+           mysql2 :  2,279.2 ops/s ± 0.6%  (   -5.4% )
+          mariadb :    2,582 ops/s ± 0.6%  (   +7.1% )
+```
+![do 1000 parameter benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=2410&data2=2279&data3=2582)
+
+##  do random number with pool
+
+```
+do <random number> with pool
+            mysql :  6,726.4 ops/s ± 0.5% 
+           mysql2 :  6,150.5 ops/s ± 0.8%  (   -8.6% )
+          mariadb :  7,463.2 ops/s ± 0.5%  (    +11% )
+```
+![do <random number> with pool benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=6726&data2=6150&data3=7463)
+
+##  insert 10 VARCHAR(100)
+
+```
+insert 10 VARCHAR(100)
+            mysql :  3,799.9 ops/s ± 0.6% 
+           mysql2 :    3,557 ops/s ± 0.6%  (   -6.4% )
+          mariadb :  4,027.9 ops/s ± 0.5%  (     +6% )
+```
+![insert 10 VARCHAR(100) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=3800&data2=3557&data3=4028)
+
+##  100 * insert CHAR(100) using batch (for mariadb) or loop for other driver (batch doesn't exists)
+
+```
+100 * insert CHAR(100) using batch (for mariadb) or loop for other driver (batch doesn't exists)
+            mysql :     67.8 ops/s ± 0.3% 
+           mysql2 :     66.1 ops/s ± 0.7%  (   -2.4% )
+          mariadb :  3,270.8 ops/s ± 1.3%  ( +4,725% )
+```
+![100 * insert CHAR(100) using batch (for mariadb) or loop for other driver (batch doesn't exists) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=68&data2=66&data3=3271)
+
+##  3 * insert 100 characters pipelining
+
+```
+3 * insert 100 characters pipelining
+            mysql :    2,366 ops/s ± 0.5% 
+           mysql2 :  2,066.5 ops/s ± 0.6%  (  -12.7% )
+          mariadb :  4,447.5 ops/s ± 1.5%  (    +88% )
+```
+![3 * insert 100 characters pipelining benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=2366&data2=2067&data3=4447)
+
+##  select 1000 rows of CHAR(32)
+
+```
+select 1000 rows of CHAR(32)
+            mysql :  1,013.8 ops/s ± 0.5% 
+           mysql2 :  1,159.7 ops/s ± 1.3%  (  +14.4% )
+          mariadb :  1,630.6 ops/s ± 0.5%  (  +60.8% )
+```
+![select 1000 rows of CHAR(32) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=1014&data2=1160&data3=1631)
+
+##  select 1000 rows of CHAR(32) - BINARY
+
+```
+select 1000 rows of CHAR(32) - BINARY
+           mysql2 :  1,125.2 ops/s ± 1.7% 
+          mariadb :  1,421.4 ops/s ± 0.6%  (  +26.3% )
+```
+![select 1000 rows of CHAR(32) - BINARY benchmark results](https://quickchart.io/chart/render/zm-36b213f4-8efe-4943-8f94-82edf94fce83?data1=1125&data2=1421)
+
+##  select 100 int
+
+```
+select 100 int
+            mysql :  2,287.9 ops/s ± 0.6% 
+           mysql2 :  1,795.3 ops/s ± 1.6%  (  -21.5% )
+          mariadb :  3,219.9 ops/s ± 0.8%  (  +40.7% )
+```
+![select 100 int benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=2288&data2=1795&data3=3220)
+
+##  select 100 int - BINARY
+
+```
+select 100 int - BINARY
+           mysql2 :  1,821.6 ops/s ± 1.7% 
+          mariadb :  5,428.1 ops/s ± 0.6%  (   +198% )
+```
+![select 100 int - BINARY benchmark results](https://quickchart.io/chart/render/zm-36b213f4-8efe-4943-8f94-82edf94fce83?data1=1822&data2=5428)
+
+##  select 1 int + char(32)
+
+```
+select 1 int + char(32)
+            mysql :  6,281.1 ops/s ± 0.6% 
+           mysql2 :    5,839 ops/s ±   1%  (     -7% )
+          mariadb :  6,862.8 ops/s ± 0.6%  (   +9.3% )
+```
+![select 1 int + char(32) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=6281&data2=5839&data3=6863)
+
+##  select 1 int + char(32) with pool
+
+```
+select 1 int + char(32) with pool
+            mysql :  6,572.1 ops/s ± 0.7% 
+           mysql2 :  5,717.6 ops/s ± 1.6%  (    -13% )
+          mariadb :    7,297 ops/s ± 0.6%  (    +11% )
+```
+![select 1 int + char(32) with pool benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=6572&data2=5718&data3=7297)
+
+##  select 1 random int + char(32)
+
+```
+select 1 random int + char(32)
+            mysql :  6,142.2 ops/s ± 0.6% 
+           mysql2 :  2,964.6 ops/s ± 1.2%  (  -51.7% )
+          mariadb :    6,781 ops/s ± 0.6%  (  +10.4% )
+```
+![select 1 random int + char(32) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=6142&data2=2965&data3=6781)
+
+##  select now()
+
+```
+select now()
+            mysql :  6,942.1 ops/s ± 0.7% 
+           mysql2 :  6,135.5 ops/s ± 1.1%  (  -11.6% )
+          mariadb :  7,640.5 ops/s ± 0.6%  (  +10.1% )
+```
+![select now() benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=6942&data2=6135&data3=7640)
+
+
+### local server
+root@ubuntu-g-4vcpu-16gb-sfo3-cli:~/mariadb-connector-nodejs# npm run benchmark
+
+> mariadb@3.1.0 benchmark
+> node benchmarks/benchmarks-all.js
+
+{
+user: 'root',
+database: 'testn',
+socketPath: '/run/mysqld/mysqld.sock',
+connectTimeout: 2000,
+charset: 'utf8mb4',
+trace: false
+}
+##  do 1
+
+```
+do 1
+            mysql : 26,415.6 ops/s ± 1.2% 
+           mysql2 : 21,160.5 ops/s ± 1.2%  (  -19.9% )
+          mariadb : 34,484.5 ops/s ± 1.2%  (  +30.5% )
+```
+![do 1 benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=26416&data2=21161&data3=34484)
+
+##  do 1000 parameter
+
+```
+do 1000 parameter
+            mysql :  3,111.2 ops/s ± 1.1% 
+           mysql2 :  3,071.3 ops/s ±   1%  (   -1.3% )
+          mariadb :  3,470.3 ops/s ± 1.1%  (  +11.5% )
+```
+![do 1000 parameter benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=3111&data2=3071&data3=3470)
+
+##  do random number with pool
+
+```
+do <random number> with pool
+            mysql : 24,798.3 ops/s ± 1.2% 
+           mysql2 : 20,368.8 ops/s ± 1.3%  (  -17.9% )
+          mariadb : 30,820.4 ops/s ± 1.1%  (  +24.3% )
+```
+![do <random number> with pool benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=24798&data2=20369&data3=30820)
+
+##  insert 10 VARCHAR(100)
+
+```
+insert 10 VARCHAR(100)
+            mysql :  7,043.9 ops/s ± 1.1% 
+           mysql2 :  5,988.2 ops/s ± 1.6%  (    -15% )
+          mariadb :  7,734.1 ops/s ± 1.3%  (   +9.8% )
+```
+![insert 10 VARCHAR(100) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=7044&data2=5988&data3=7734)
+
+##  100 * insert CHAR(100) using batch (for mariadb) or loop for other driver (batch doesn't exists)
+
+```
+100 * insert CHAR(100) using batch (for mariadb) or loop for other driver (batch doesn't exists)
+            mysql :      219 ops/s ± 0.9% 
+           mysql2 :    173.6 ops/s ± 1.4%  (  -20.7% )
+          mariadb :  6,489.8 ops/s ± 1.2%  ( +2,863% )
+```
+![100 * insert CHAR(100) using batch (for mariadb) or loop for other driver (batch doesn't exists) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=219&data2=174&data3=6490)
+
+##  3 * insert 100 characters pipelining
+
+```
+3 * insert 100 characters pipelining
+            mysql :  6,940.5 ops/s ±   1% 
+           mysql2 :  6,111.9 ops/s ± 1.5%  (  -11.9% )
+          mariadb : 12,327.3 ops/s ± 1.4%  (  +77.6% )
+```
+![3 * insert 100 characters pipelining benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=6940&data2=6112&data3=12327)
+
+##  select 1000 rows of CHAR(32)
+
+```
+select 1000 rows of CHAR(32)
+            mysql :  1,140.7 ops/s ± 0.9% 
+           mysql2 :  1,474.5 ops/s ± 1.5%  (  +29.3% )
+          mariadb :  2,185.2 ops/s ± 1.1%  (  +91.6% )
+```
+![select 1000 rows of CHAR(32) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=1141&data2=1475&data3=2185)
+
+##  select 1000 rows of CHAR(32) - BINARY
+
+```
+select 1000 rows of CHAR(32) - BINARY
+           mysql2 :    1,439 ops/s ± 1.6% 
+          mariadb :  1,797.5 ops/s ± 0.6%  (  +24.9% )
+```
+![select 1000 rows of CHAR(32) - BINARY benchmark results](https://quickchart.io/chart/render/zm-36b213f4-8efe-4943-8f94-82edf94fce83?data1=1439&data2=1797)
+
+##  select 100 int
+
+```
+select 100 int
+            mysql :  2,738.7 ops/s ± 1.3% 
+           mysql2 :  2,404.9 ops/s ± 1.3%  (  -12.2% )
+          mariadb :  5,650.8 ops/s ± 1.4%  ( +106.3% )
+```
+![select 100 int benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=2739&data2=2405&data3=5651)
+
+##  select 100 int - BINARY
+
+```
+select 100 int - BINARY
+           mysql2 :  2,473.4 ops/s ± 1.3% 
+          mariadb :   10,533 ops/s ± 1.7%  ( +325.9% )
+```
+![select 100 int - BINARY benchmark results](https://quickchart.io/chart/render/zm-36b213f4-8efe-4943-8f94-82edf94fce83?data1=2473&data2=10533)
+
+##  select 1 int + char(32)
+
+```
+select 1 int + char(32)
+            mysql : 19,504.9 ops/s ±   1% 
+           mysql2 : 15,340.4 ops/s ± 1.5%  (  -21.4% )
+          mariadb : 24,799.3 ops/s ± 0.4%  (  +27.1% )
+```
+![select 1 int + char(32) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=19505&data2=15340&data3=24799)
+
+##  select 1 int + char(32) with pool
+
+```
+select 1 int + char(32) with pool
+            mysql :   19,272 ops/s ±   1% 
+           mysql2 : 14,560.2 ops/s ± 1.7%  (  -24.4% )
+          mariadb : 24,219.4 ops/s ± 0.8%  (  +25.7% )
+```
+![select 1 int + char(32) with pool benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=19272&data2=14560&data3=24219)
+
+##  select 1 random int + char(32)
+
+```
+select 1 random int + char(32)
+            mysql : 17,599.9 ops/s ± 1.4% 
+           mysql2 :  4,828.1 ops/s ± 1.5%  (  -72.6% )
+          mariadb : 21,099.5 ops/s ± 1.4%  (  +19.9% )
+```
+![select 1 random int + char(32) benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=17600&data2=4828&data3=21100)
+
+##  select now()
+
+```
+select now()
+            mysql : 18,902.6 ops/s ± 1.8% 
+           mysql2 : 15,491.6 ops/s ± 1.6%  (    -18% )
+          mariadb : 25,456.7 ops/s ± 0.6%  (  +34.7% )
+```
+![select now() benchmark results](https://quickchart.io/chart/render/zm-ef74089a-be91-49f1-b5a0-5b9ac5752435?data1=18903&data2=15492&data3=25457)
+

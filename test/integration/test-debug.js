@@ -6,42 +6,66 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const util = require('util');
+const winston = require('winston');
+const { isXpand } = require('../base');
+const Conf = require('../conf');
 
 describe('debug', () => {
   const smallFileName = path.join(os.tmpdir(), 'smallLocalInfileDebug.txt');
-  let initialStdOut;
-  let permitLocalInfile = true;
 
-  before((done) => {
-    shareConn
-      .query('select @@local_infile')
-      .then((rows) => {
-        permitLocalInfile = rows[0]['@@local_infile'] === 1;
-        return new Promise(function (resolve, reject) {
-          fs.writeFile(smallFileName, '1,hello\n2,world\n', 'utf8', function (err) {
-            if (err) reject(err);
-            else resolve();
+  let permitLocalInfile = true;
+  let tmpLogFile = path.join(os.tmpdir(), 'combined.txt');
+  let logger;
+
+  before(function (done) {
+    if (!isXpand()) {
+      try {
+        fs.unlinkSync(tmpLogFile);
+      } catch (e) {}
+      shareConn
+        .query('select @@local_infile')
+        .then((rows) => {
+          permitLocalInfile = rows[0]['@@local_infile'] === 1 || rows[0]['@@local_infile'] === 1n;
+          return new Promise(function (resolve, reject) {
+            fs.writeFile(smallFileName, '1,hello\n2,world\n', 'utf8', function (err) {
+              if (err) reject(err);
+              else resolve();
+            });
           });
-        });
-      })
-      .then(() => {
-        //ensure that debug from previous test are written to console
-        setTimeout(() => {
-          done();
-        }, 1000);
-      })
-      .catch(done);
+        })
+        .then(() => {
+          //ensure that debug from previous test are written to console
+          setTimeout(() => {
+            done();
+          }, 1000);
+        })
+        .catch(done);
+    } else done();
+  });
+
+  beforeEach(async function () {
+    logger = winston.createLogger({
+      transports: [new winston.transports.File({ filename: tmpLogFile })]
+    });
+    await shareConn.query('DROP TABLE IF EXISTS debugVoid');
   });
 
   //ensure that debug from previous test are written to console
   afterEach((done) => {
+    logger.close();
+    try {
+      fs.unlinkSync(tmpLogFile);
+    } catch (e) {}
     setTimeout(() => {
       done();
     }, 1000);
   });
 
-  after((done) => {
-    fs.unlink(smallFileName, done);
+  after(async function () {
+    if (!isXpand()) {
+      fs.unlinkSync(smallFileName);
+      await shareConn.query('DROP TABLE IF EXISTS debugVoid');
+    }
   });
 
   it('select request debug', function (done) {
@@ -49,20 +73,24 @@ describe('debug', () => {
   });
 
   it('select request debug compress', function (done) {
+    if (isXpand()) this.skip();
     testQueryDebug(true, done);
   });
 
   function testQueryDebug(compress, done) {
-    initialStdOut = console.log;
-    let data = '';
-    console.log = function () {
-      data += util.format.apply(null, arguments) + '\n';
-    };
     base
-      .createConnection({ compress: compress })
+      .createConnection({
+        compress: compress,
+        prepareCacheLength: 0,
+        logger: {
+          network: null,
+          query: (msg) => logger.info(msg),
+          error: (msg) => logger.info(msg)
+        }
+      })
       .then((conn) => {
         conn
-          .query('SELECT 1')
+          .query('CREATE TABLE debugVoid (val int)')
           .then(() => {
             if (
               compress &&
@@ -70,9 +98,9 @@ describe('debug', () => {
               process.env.srv !== 'skysql' &&
               process.env.srv !== 'skysql-ha'
             ) {
-              conn.debugCompress(true);
+              conn.debugCompress((msg) => logger.info(msg));
             } else {
-              conn.debug(true);
+              conn.debug((msg) => logger.info(msg));
             }
             return conn.query('SELECT 2');
           })
@@ -90,22 +118,37 @@ describe('debug', () => {
             return conn.query('SELECT 3');
           })
           .then(() => {
+            return conn.prepare('SELECT ?');
+          })
+          .then((prepare) => {
+            return prepare.execute(['t']).then((res) => prepare.close());
+          })
+          .then(() => {
+            return conn.batch('INSERT INTO debugVoid VALUES (?)', [[1], [2]]);
+          })
+          .then(() => {
             return conn.end();
           })
           .then(() => {
             //wait 100ms to ensure stream has been written
             setTimeout(() => {
-              console.log = initialStdOut;
-
               const serverVersion = conn.serverVersion();
-              if (
-                process.env.srv === 'maxscale' ||
-                process.env.srv === 'skysql' ||
-                process.env.srv === 'skysql-ha'
-              )
+              if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
                 compress = false;
-              const rangeWithEOF = compress ? [900, 1200] : [1800, 2400];
-              const rangeWithoutEOF = compress ? [900, 1200] : [1750, 2000];
+              const rangeWithEOF = compress ? [1500, 1900] : [1800, 4150];
+              const rangeWithoutEOF = compress ? [1500, 1900] : [2350, 3150];
+              const data = fs.readFileSync(tmpLogFile, 'utf8');
+              console.log(data);
+              assert.isTrue(data.includes('QUERY: SELECT 3'));
+              assert.isTrue(data.includes('PREPARE:'));
+              assert.isTrue(data.includes('EXECUTE:'));
+              assert.isTrue(data.includes("SELECT ? - parameters:['t']"));
+              assert.isTrue(data.includes('CLOSE PREPARE:'));
+              if (conn.info.isMariaDB() && conn.info.hasMinVersion(10, 2, 2)) {
+                assert.isTrue(data.includes('BULK:'));
+                assert.isTrue(data.includes('INSERT INTO debugVoid VALUES (?) - parameters:[[1],[2]]'));
+              }
+              assert.isTrue(data.includes('QUIT'));
               if (
                 ((conn.info.isMariaDB() && conn.info.hasMinVersion(10, 2, 2)) ||
                   (!conn.info.isMariaDB() && conn.info.hasMinVersion(5, 7, 5))) &&
@@ -153,22 +196,12 @@ describe('debug', () => {
   }
 
   it('select big request (compressed data) debug', function (done) {
-    if (
-      process.env.srv === 'maxscale' ||
-      process.env.srv === 'skysql' ||
-      process.env.srv === 'skysql-ha'
-    )
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand())
       this.skip();
-    initialStdOut = console.log;
-    let data = '';
-    console.log = function () {
-      data += util.format.apply(null, arguments) + '\n';
-    };
 
     const buf = Buffer.alloc(5000, 'z');
-
     base
-      .createConnection({ compress: true, debugCompress: true })
+      .createConnection({ compress: true, debugCompress: true, logger: (msg) => logger.info(msg) })
       .then((conn) => {
         conn
           .query('SELECT ?', buf)
@@ -178,9 +211,9 @@ describe('debug', () => {
               conn
                 .end()
                 .then(() => {
-                  console.log = initialStdOut;
                   const serverVersion = conn.serverVersion();
-                  let range = [820, 2400];
+                  const data = fs.readFileSync(tmpLogFile, 'utf8');
+                  let range = [8000, 10500];
                   assert(
                     data.length > range[0] && data.length < range[1],
                     'wrong data length : ' +
@@ -207,26 +240,52 @@ describe('debug', () => {
 
   it('load local infile debug', function (done) {
     if (!permitLocalInfile) this.skip();
+    if (isXpand()) this.skip();
     testLocalInfileDebug(false, done);
   });
 
   it('load local infile debug compress', function (done) {
     if (!permitLocalInfile) this.skip();
+    if (isXpand()) this.skip();
     testLocalInfileDebug(true, done);
   });
 
-  function testLocalInfileDebug(compress, done) {
-    initialStdOut = console.log;
+  it('debug goes to log id not logger set', async function () {
+    const initialStdOut = console.log;
     let data = '';
     console.log = function () {
       data += util.format.apply(null, arguments) + '\n';
     };
 
+    try {
+      const conn = await base.createConnection({ debug: true });
+      const res = await conn.query("SELECT '1'");
+      conn.end();
+      const range = [3200, 5000];
+      assert(
+        data.length > range[0] && data.length < range[1],
+        'wrong data length : ' +
+          data.length +
+          ' expected value between ' +
+          range[0] +
+          ' and ' +
+          range[1] +
+          '.' +
+          '\n data :\n' +
+          data
+      );
+    } finally {
+      console.log = initialStdOut;
+    }
+  });
+
+  function testLocalInfileDebug(compress, done) {
     base
       .createConnection({
         permitLocalInfile: true,
         debug: true,
-        compress: compress
+        compress: compress,
+        logger: (msg) => logger.info(msg)
       })
       .then((conn) => {
         conn
@@ -245,10 +304,9 @@ describe('debug', () => {
             conn.end();
             //wait 100ms to ensure stream has been written
             setTimeout(() => {
-              console.log = initialStdOut;
-
+              const data = fs.readFileSync(tmpLogFile, 'utf8');
               const serverVersion = conn.serverVersion();
-              const range = [5500, 7000];
+              const range = [6500, 9000 + (Conf.baseConfig.ssl ? 800 : 0)];
               assert(
                 data.length > range[0] && data.length < range[1],
                 'wrong data length : ' +
@@ -271,19 +329,52 @@ describe('debug', () => {
       .catch(done);
   }
 
-  it('log debug packets', function (done) {
-    base
-      .createConnection({ logPackets: true })
-      .then((conn) => {
-        conn
-          .query('SELECT 1')
-          .then((rows) => {
-            assert.isTrue(conn.info.getLastPackets().length > 570);
-            conn.end();
-            done();
-          })
-          .catch(done);
-      })
-      .catch(done);
+  it('fast path command debug', async function () {
+    await testPingDebug(false);
   });
+
+  it('fast path commanddebug compress', async function () {
+    if (isXpand()) this.skip();
+    await testPingDebug(true);
+  });
+
+  async function testPingDebug(compress) {
+    const conn = await base.createConnection({
+      compress: compress,
+      logger: {
+        network: null,
+        query: (msg) => logger.info(msg),
+        error: (msg) => logger.info(msg)
+      }
+    });
+    await conn.ping(1000);
+    await conn.end();
+
+    //wait 100ms to ensure stream has been written
+    await new Promise(function (resolve) {
+      setTimeout(resolve, 100);
+    });
+    const serverVersion = conn.serverVersion();
+    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
+      compress = false;
+    const range = compress ? [60, 150] : [60, 140];
+    const data = fs.readFileSync(tmpLogFile, 'utf8');
+    assert.isTrue(data.includes('PING'));
+    assert.isTrue(data.includes('QUIT'));
+
+    assert(
+      data.length > range[0] && data.length < range[1],
+      'wrong data length : ' +
+        data.length +
+        ' expected value between ' +
+        range[0] +
+        ' and ' +
+        range[1] +
+        '.' +
+        '\n server version : ' +
+        serverVersion +
+        '\n data :\n' +
+        data
+    );
+  }
 });
