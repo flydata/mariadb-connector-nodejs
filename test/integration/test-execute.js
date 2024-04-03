@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -7,6 +10,8 @@ const os = require('os');
 const path = require('path');
 const { isXpand } = require('../base');
 const { baseConfig } = require('../conf');
+const { Readable } = require('stream');
+const Conf = require('../conf');
 
 describe('prepare and execute', () => {
   let bigVal;
@@ -54,12 +59,107 @@ describe('prepare and execute', () => {
     conn.end();
   });
 
+  it('execute error', async () => {
+    const conn = await base.createConnection({ prepareCacheLength: 0 });
+    try {
+      await conn.execute('wrong query');
+      throw new Error('Expect error');
+    } catch (err) {
+      if (!isXpand()) {
+        assert.isTrue(err.message.includes('You have an error in your SQL syntax'));
+        assert.isTrue(err.message.includes('sql: wrong query'));
+        assert.equal(err.sqlState, 42000);
+      }
+      assert.equal(err.errno, 1064);
+      assert.equal(err.code, 'ER_PARSE_ERROR');
+    }
+    conn.end();
+  });
+
   it('prepare close, no cache', async () => {
     const conn = await base.createConnection({ prepareCacheLength: 0 });
     const prepare = await conn.prepare('select ?', [2]);
     assert.equal(prepare.parameterCount, 1);
     assert.equal(prepare.columns.length, 1);
     prepare.close();
+    conn.end();
+  });
+
+  it('prepare close, with eof', async () => {
+    const conn = await base.createConnection({ prepareCacheLength: 0, keepEof: true });
+    const prepare = await conn.prepare("select 'a' as a, ? as b");
+    assert.equal(prepare.parameterCount, 1);
+    assert.equal(prepare.columns.length, 2);
+    const res = await prepare.execute(['2']);
+    assert.deepEqual(res, [{ a: 'a', b: '2' }]);
+    prepare.close();
+    conn.end();
+  });
+
+  it('execute logger', async () => {
+    let logged = '';
+    const conn = await base.createConnection({
+      logger: {
+        query: (msg) => {
+          logged += msg + '\n';
+        }
+      }
+    });
+    const prepare = await conn.prepare("select 'a' as a, ? as b");
+    const res = await prepare.execute(['2']);
+    assert.deepEqual(res, [{ a: 'a', b: '2' }]);
+    assert.isTrue(
+      logged.includes("PREPARE: select 'a' as a, ? as b\nEXECUTE: (") &&
+        logged.includes(") sql: select 'a' as a, ? as b - parameters:['2']\n")
+    );
+    prepare.close();
+    conn.end();
+  });
+
+  it('logger error', async () => {
+    let errorLogged = '';
+    const conn = await base.createConnection({
+      logger: {
+        error: (msg) => {
+          errorLogged += msg + '\n';
+        }
+      }
+    });
+    try {
+      await conn.query('SELECT * FROM nonexistant WHERE a = ? AND b= ?', ['a', true]);
+    } catch (e) {
+      // eat
+    }
+    console.log(errorLogged);
+    assert.isTrue(
+      errorLogged.includes(
+        "Table '" +
+          Conf.baseConfig.database +
+          ".nonexistant' doesn't exist\n" +
+          "sql: SELECT * FROM nonexistant WHERE a = ? AND b= ? - parameters:['a',true]"
+      ),
+      errorLogged
+    );
+    conn.end();
+  });
+
+  it('logger error without parameters', async () => {
+    let errorLogged = '';
+    const conn = await base.createConnection({
+      logger: {
+        error: (msg) => {
+          errorLogged += msg + '\n';
+        }
+      },
+      logParam: false
+    });
+    try {
+      await conn.query('SELECT * FROM NONEXISTANT WHERE a = ? AND b= ?', ['a', true]);
+    } catch (e) {
+      // eat
+    }
+    console.log(errorLogged);
+    assert.isFalse(errorLogged.includes(" - parameters:['a',true]"));
     conn.end();
   });
 
@@ -74,6 +174,58 @@ describe('prepare and execute', () => {
     conn.end();
   });
 
+  it('prepare already close', async () => {
+    const conn = await base.createConnection({ prepareCacheLength: 2 });
+    const prepare = await conn.prepare('select 10,?');
+    prepare.close();
+    try {
+      await prepare.execute(['a']);
+      throw new Error('must have thrown error');
+    } catch (err) {
+      assert.equal(err.errno, 45051);
+      assert.equal(err.code, 'ER_PREPARE_CLOSED');
+    }
+    conn.end();
+  });
+
+  it('multiple long data', async () => {
+    const conn = await base.createConnection();
+    await conn.query('DROP TABLE IF EXISTS longDataTest');
+    await conn.query('CREATE TABLE longDataTest(v int, a blob, b blob)');
+    await conn.beginTransaction();
+    const prepare = await conn.prepare('INSERT INTO longDataTest VALUES (?,?,?)');
+    await prepare.execute(['10', Buffer.from('a'), Buffer.from('b')]);
+    const res = await conn.query('SELECT * FROM longDataTest');
+    assert.deepEqual(res, [
+      {
+        v: 10,
+        a: Buffer.from('a'),
+        b: Buffer.from('b')
+      }
+    ]);
+    await conn.end();
+  });
+
+  it('multiple stream data', async () => {
+    const conn = await base.createConnection();
+    await conn.query('DROP TABLE IF EXISTS longDataTest');
+    await conn.query('CREATE TABLE longDataTest(v int, a blob, b blob)');
+    await conn.beginTransaction();
+    const readableStream1 = Readable.from([Buffer.from('hello')]);
+    const readableStream2 = Readable.from([Buffer.from('world')]);
+    const prepare = await conn.prepare('INSERT INTO longDataTest VALUES (?,?,?)');
+    await prepare.execute(['10', readableStream1, readableStream2]);
+    const res = await conn.query('SELECT * FROM longDataTest');
+    assert.deepEqual(res, [
+      {
+        v: 10,
+        a: Buffer.from('hello'),
+        b: Buffer.from('world')
+      }
+    ]);
+    await conn.end();
+  });
+
   it('prepare after prepare close - no cache', async () => {
     const conn = await base.createConnection({ prepareCacheLength: 0 });
     const prepare = await conn.prepare('select ?');
@@ -83,7 +235,60 @@ describe('prepare and execute', () => {
       await prepare.execute('1');
       throw new Error('must have thrown error');
     } catch (e) {
+      assert.equal(e.sql, "select ? - parameters:['1']");
       assert.isTrue(e.message.includes('Execute fails, prepare command as already been closed'));
+    }
+    try {
+      await prepare.execute([1, 2]);
+      throw new Error('must have thrown error');
+    } catch (e) {
+      assert.equal(e.sql, 'select ? - parameters:[1,2]');
+      assert.isTrue(e.message.includes('Execute fails, prepare command as already been closed'));
+    }
+    const prepare2 = await conn.prepare('select ?');
+    await prepare2.execute('2');
+    await prepare2.close();
+
+    conn.end();
+  });
+
+  it('prepare after prepare close - no cache - error trunk', async () => {
+    const conn = await base.createConnection({ prepareCacheLength: 0, debugLen: 8 });
+    const prepare = await conn.prepare('select ?');
+    await prepare.execute('1');
+    await prepare.close();
+    try {
+      await prepare.execute('1');
+      throw new Error('must have thrown error');
+    } catch (e) {
+      assert.equal(e.sql, 'select ?...');
+      assert.isTrue(e.message.includes('Execute fails, prepare command as already been closed'));
+    }
+    try {
+      await prepare.execute([1, 2]);
+      throw new Error('must have thrown error');
+    } catch (e) {
+      assert.equal(e.sql, 'select ?...');
+      assert.isTrue(e.message.includes('Execute fails, prepare command as already been closed'));
+    }
+    const prepare2 = await conn.prepare('select ?');
+    await prepare2.execute('2');
+    await prepare2.close();
+
+    conn.end();
+  });
+
+  it('prepare after prepare close - no cache - parameter logged', async () => {
+    const conn = await base.createConnection({ prepareCacheLength: 0, logParam: false });
+    const prepare = await conn.prepare('select ?');
+    await prepare.execute('1');
+    await prepare.close();
+    try {
+      await prepare.execute('1');
+      throw new Error('must have thrown error');
+    } catch (e) {
+      assert.isTrue(e.message.includes('Execute fails, prepare command as already been closed'));
+      assert.equal(e.sql, 'select ?');
     }
 
     const prepare2 = await conn.prepare('select ?');
@@ -121,6 +326,7 @@ describe('prepare and execute', () => {
     //not in cache, so re-prepare
     const prepare2 = await conn.prepare('select ?');
     await prepare2.execute('2');
+    assert.equal(prepare2.database, baseConfig.database);
     await prepare2.close();
 
     conn.end();
@@ -263,10 +469,28 @@ describe('prepare and execute', () => {
     res = await conn.execute('select ? as a', [3]);
     assert.isTrue(res[0].a === 3 || res[0].a === 3n);
 
-    res = await conn.execute('select ? as a', ['a']);
+    res = await conn.execute('select ? as b2', ['a']);
     if (shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(8, 0, 0)) {
-      assert.isTrue(res[0].a === 'a');
+      assert.isTrue(res[0].b2 === 'a');
     }
+
+    // without parameter
+    res = await conn.execute('select 2 as b3');
+    assert.isTrue(res[0].b3 === 2 || res[0].b3 === 2n);
+
+    // without pipelining
+    res = await conn.execute({ sql: 'select 2 as b4', pipelining: false });
+    assert.isTrue(res[0].b4 === 2 || res[0].b4 === 2n);
+
+    // with streaming parameter
+    async function* generate() {
+      yield 'hello';
+      yield 'streams';
+    }
+    const readable = Readable.from(generate(), { objectMode: false });
+    res = await conn.execute('select CONVERT(? USING utf8) as b5', [readable]);
+    assert.isTrue(res[0].b5 === 'hellostreams');
+
     conn.end();
   });
 
@@ -303,6 +527,19 @@ describe('prepare and execute', () => {
     conn.end();
   });
 
+  it('execution with namedPlaceholders without cache', async () => {
+    const conn = await base.createConnection({ namedPlaceholders: true, prepareCacheLength: 0 });
+
+    let res = await conn.execute('select :param2 as a, :param1 as b', { param1: 2, param2: 3 });
+    assert.isTrue(res[0].a === 3 || res[0].a === 3n);
+    assert.isTrue(res[0].b === 2 || res[0].b === 2n);
+
+    res = await conn.execute('select :param2 as a, :param1 as b', { param1: 4, param2: 5 });
+    assert.isTrue(res[0].a === 5 || res[0].a === 5n);
+    assert.isTrue(res[0].b === 4 || res[0].b === 4n);
+
+    conn.end();
+  });
   it('prepare buffer overflow bigint', async function () {
     if (maxAllowedSize < 20 * 1024 * 1024) this.skip();
     this.timeout(30000);

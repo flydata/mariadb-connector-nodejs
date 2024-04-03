@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -345,7 +348,6 @@ describe('batch callback', function () {
               done(new Error('must have thrown error !'));
             });
           }
-          assert.isTrue(err != null);
           assert.equal(err.errno, 1146);
           assert.equal(err.code, 'ER_NO_SUCH_TABLE');
           if (!isXpand()) {
@@ -456,6 +458,7 @@ describe('batch callback', function () {
       if (err) return done(err);
       conn.query('DROP TABLE IF EXISTS nonRewritableBatch');
       conn.query('CREATE TABLE nonRewritableBatch(id int, t varchar(256))');
+      conn.beginTransaction();
       conn.batch(
         'INSERT INTO nonRewritableBatch(id, t) VALUES (?,?)',
         [
@@ -478,8 +481,10 @@ describe('batch callback', function () {
                   t: 'jack'
                 }
               ]);
-              conn.end();
-              done();
+              conn.commit((err, res) => {
+                conn.end();
+                done();
+              });
             });
           }
         }
@@ -605,7 +610,6 @@ describe('batch callback', function () {
               done(new Error('must have thrown error !'));
             });
           }
-          assert.isTrue(err != null);
           assert.equal(err.errno, 1146);
           assert.equal(err.code, 'ER_NO_SUCH_TABLE');
           if (!isXpand()) {
@@ -701,7 +705,6 @@ describe('batch callback', function () {
               done(new Error('must have thrown error !'));
             });
           }
-          assert.isTrue(err != null);
           if (!isXpand()) {
             assert.equal(err.errno, 1146);
             assert.equal(err.code, 'ER_NO_SUCH_TABLE');
@@ -727,34 +730,36 @@ describe('batch callback', function () {
 
       conn.query('DROP TABLE IF EXISTS nonRewritableHoldersErr');
       conn.query('CREATE TABLE nonRewritableHoldersErr(id int, t varchar(256))');
-      conn.batch(
-        'INSERT INTO nonRewritableHoldersErr(id, t) VALUES (:id2,:id1)',
-        [
-          { id2: 1, id1: 'john' },
-          { id1: 'jack', id2: 2 }
-        ],
-        (err, res) => {
-          if (err) {
-            conn.end();
-            done(err);
-          } else {
-            conn.query('SELECT * FROM nonRewritableHoldersErr', (err, res) => {
-              assert.deepEqual(res, [
-                {
-                  id: 1,
-                  t: 'john'
-                },
-                {
-                  id: 2,
-                  t: 'jack'
-                }
-              ]);
+      conn.beginTransaction(() => {
+        conn.batch(
+          'INSERT INTO nonRewritableHoldersErr(id, t) VALUES (:id2,:id1)',
+          [
+            { id2: 1, id1: 'john' },
+            { id1: 'jack', id2: 2 }
+          ],
+          (err, res) => {
+            if (err) {
               conn.end();
-              done();
-            });
+              done(err);
+            } else {
+              conn.query('SELECT * FROM nonRewritableHoldersErr', (err, res) => {
+                assert.deepEqual(res, [
+                  {
+                    id: 1,
+                    t: 'john'
+                  },
+                  {
+                    id: 2,
+                    t: 'jack'
+                  }
+                ]);
+                conn.end();
+                done();
+              });
+            }
           }
-        }
-      );
+        );
+      });
     });
   };
 
@@ -840,9 +845,8 @@ describe('batch callback', function () {
         (err) => {
           if (!err) {
             conn.end();
-            done(new Error('must have thrown error !'));
+            return done(new Error('must have thrown error !'));
           }
-          assert.isTrue(err != null);
           if (!isXpand()) {
             assert.equal(err.errno, 1146);
             assert.equal(err.code, 'ER_NO_SUCH_TABLE');
@@ -894,6 +898,7 @@ describe('batch callback', function () {
       const conn = await base.createConnection({ compress: useCompression, bulk: true });
       conn.query('DROP TABLE IF EXISTS blabla');
       conn.query('CREATE TABLE blabla(i int, i2 int)');
+      conn.beginTransaction();
       await conn.batch('INSERT INTO `blabla` values (?, ?)', [
         [1, 2],
         [1, undefined]
@@ -904,6 +909,7 @@ describe('batch callback', function () {
         { i: 1, i2: null }
       ]);
       conn.query('DROP TABLE IF EXISTS blabla');
+      conn.commit();
       conn.end();
     });
 
@@ -959,7 +965,7 @@ describe('batch callback', function () {
     });
   });
 
-  describe('standard question mark and compress with bulk', () => {
+  describe('standard question mark and compress with bulk', function () {
     const useCompression = true;
 
     it('simple batch, local date', function (done) {
@@ -1087,29 +1093,31 @@ describe('batch callback', function () {
       const conn = base.createCallbackConnection({ compress: useCompression, bulk: true });
       conn.query('DROP TABLE IF EXISTS blabla');
       conn.query('CREATE TABLE blabla(i int, i2 int)');
-      conn.batch(
-        'INSERT INTO `blabla` values (?,?)',
-        [
-          [1, 2],
-          [1, undefined]
-        ],
-        (err, res) => {
-          conn.query('SELECT * from blabla', (err, rows) => {
-            if (err) {
-              done(err);
-            } else {
-              assert.deepEqual(rows, [
-                { i: 1, i2: 2 },
-                { i: 1, i2: null }
-              ]);
-              conn.query('DROP TABLE IF EXISTS blabla', (err) => {
-                conn.end();
-                done();
-              });
-            }
-          });
-        }
-      );
+      conn.beginTransaction(() => {
+        conn.batch(
+          'INSERT INTO `blabla` values (?,?)',
+          [
+            [1, 2],
+            [1, undefined]
+          ],
+          (err, res) => {
+            conn.query('SELECT * from blabla', (err, rows) => {
+              if (err) {
+                done(err);
+              } else {
+                assert.deepEqual(rows, [
+                  { i: 1, i2: 2 },
+                  { i: 1, i2: null }
+                ]);
+                conn.query('DROP TABLE IF EXISTS blabla', (err) => {
+                  conn.end();
+                  done();
+                });
+              }
+            });
+          }
+        );
+      });
     });
 
     it('simple batch offset date', function (done) {

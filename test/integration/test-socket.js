@@ -1,14 +1,17 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
 const { assert } = require('chai');
 const Conf = require('../conf');
+const { isMaxscale } = require('../base');
 
 describe('test socket', () => {
   it('named pipe', function (done) {
     if (process.platform !== 'win32') this.skip();
-    if (!process.env.LOCAL_SOCKET_AVAILABLE || process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha')
-      this.skip();
+    if (!process.env.LOCAL_SOCKET_AVAILABLE || isMaxscale() || process.env.srv === 'skysql-ha') this.skip();
     if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com') this.skip();
     const test = this;
     shareConn
@@ -49,7 +52,8 @@ describe('test socket', () => {
 
   it('named pipe error', function (done) {
     if (process.platform !== 'win32') this.skip();
-    if (!process.env.LOCAL_SOCKET_AVAILABLE) this.skip();
+    const localSocket = process.env.LOCAL_SOCKET_AVAILABLE;
+    if (localSocket !== undefined && localSocket) this.skip();
     if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com') this.skip();
 
     shareConn

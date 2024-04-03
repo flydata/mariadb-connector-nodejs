@@ -12,7 +12,7 @@ Install the mariadb Connector using npm
 $ npm install mariadb
 ```
 
-You can then uses the Connector in your application code with the Callback API.  For instance,
+You can then use the Connector in your application code with the Callback API.  For instance,
 
 ```js
   const mariadb = require('mariadb/callback');
@@ -335,7 +335,7 @@ Specific options for pools are :
 |        **`acquireTimeout`** | Timeout to get a new connection from pool in ms.                                                                                                                                                                                                                                                                                                     | *integer* |             10000              |
 |       **`connectionLimit`** | Maximum number of connection in pool.                                                                                                                                                                                                                                                                                                                | *integer* |               10               |
 |           **`idleTimeout`** | Indicate idle time after which a pool connection is released. Value must be lower than [@@wait_timeout](https://mariadb.com/kb/en/library/server-system-variables/#wait_timeout). In seconds (0 means never release)                                                                                                                                 | *integer* |              1800              |
-| **`initializationTimeout`** | Pool will retry creating connection in loop, emitting 'error' event when reaching this timeout. In milliseconds                                                                                                                                                                                                                                      | *integer* |             30000              |
+| **`initializationTimeout`** | Pool will retry creating connection in loop, emitting 'error' event when reaching this timeout. In milliseconds                                                                                                                                                                                                                                      | *integer* |     `acquireTimeout` value     |
 |           **`minimumIdle`** | Permit to set a minimum number of connection in pool. **Recommendation is to use fixed pool, so not setting this value**.                                                                                                                                                                                                                            | *integer* | *set to connectionLimit value* |
 |    **`minDelayValidation`** | When asking a connection to pool, the pool will validate the connection state. "minDelayValidation" permits disabling this validation if the connection has been borrowed recently avoiding useless verifications in case of frequent reuse of connections. 0 means validation is done each time the connection is asked. (in ms)                    | *integer* |              500               |
 |     **`noControlAfterUse`** | After giving back connection to pool (connection.end) connector will reset or rollback connection to ensure a valid state. This option permit to disable those controls                                                                                                                                                                              | *boolean* |             false              |
@@ -523,9 +523,9 @@ https.get("https://node.green/#ES2018-features-Promise-prototype-finally-basic-s
 
 Queries issued from the Connector return two different kinds of results: a JSON object and an array, depending on the type of query you issue.  Queries that write to the database, such as `INSERT`, `DELETE` and `UPDATE` commands return a JSON object with the following properties:
 
-* `affectedRows`: Indicates the number of rows affected by the query.
-* `insertId`: Shows the last auto-increment value from an `INSERT`.
-* `warningStatus`: Indicates whether the query ended with a warning.
+* `affectedRows`: An integer listing the number of affected rows.
+* `insertId`: An integer noting the auto-increment ID. In case multiple rows have been inserted, this corresponds to the FIRST auto-increment value.
+* `warningStatus`: An integer indicating whether the query ended with a warning.
 
 ```js
 connection.query(
@@ -854,7 +854,7 @@ When the Connector encounters an error, Promise returns an [`Error`](https://dev
 
 Example on `console.log(error)`: 
 ```
-{ Error: (conn=116, no: 1146, SQLState: 42S02) Table 'testn.falsetable' doesn't exist
+{ Error: (conn:116, no: 1146, SQLState: 42S02) Table 'testn.falsetable' doesn't exist
   sql: INSERT INTO falseTable(t1, t2, t3, t4, t5) values (?, ?, ?, ?, ?)  - parameters:[1,0x01ff,'hh','01/01/2001 00:00:00.000',null]
       ...
       at Socket.Readable.push (_stream_readable.js:134:10)
@@ -884,7 +884,7 @@ Connection object that inherits from the Node.js [`EventEmitter`](https://nodejs
     //will be executed after 100ms due to inactivity, socket has closed. 
     console.log(err);
     //log : 
-    //{ Error: (conn=6283, no: 45026, SQLState: 08S01) socket timeout
+    //{ Error: (conn:6283, no: 45026, SQLState: 08S01) socket timeout
     //    ...
     //    at Socket.emit (events.js:208:7)
     //    at Socket._onTimeout (net.js:410:8)

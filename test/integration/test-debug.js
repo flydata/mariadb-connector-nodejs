@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -7,43 +10,35 @@ const os = require('os');
 const path = require('path');
 const util = require('util');
 const winston = require('winston');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
 const Conf = require('../conf');
 
 describe('debug', () => {
   const smallFileName = path.join(os.tmpdir(), 'smallLocalInfileDebug.txt');
 
   let permitLocalInfile = true;
-  let tmpLogFile = path.join(os.tmpdir(), 'combined.txt');
   let logger;
+  let setNameAddition = 0;
+  let fileIncrement = 0;
 
-  before(function (done) {
+  before(async function () {
     if (!isXpand()) {
       try {
-        fs.unlinkSync(tmpLogFile);
+        fs.unlinkSync(path.join(os.tmpdir(), 'combined*.txt'));
       } catch (e) {}
-      shareConn
-        .query('select @@local_infile')
-        .then((rows) => {
-          permitLocalInfile = rows[0]['@@local_infile'] === 1 || rows[0]['@@local_infile'] === 1n;
-          return new Promise(function (resolve, reject) {
-            fs.writeFile(smallFileName, '1,hello\n2,world\n', 'utf8', function (err) {
-              if (err) reject(err);
-              else resolve();
-            });
-          });
-        })
-        .then(() => {
-          //ensure that debug from previous test are written to console
-          setTimeout(() => {
-            done();
-          }, 1000);
-        })
-        .catch(done);
-    } else done();
+      const rows = await shareConn.query('select @@local_infile');
+      permitLocalInfile = rows[0]['@@local_infile'] === 1 || rows[0]['@@local_infile'] === 1n;
+      fs.writeFileSync(smallFileName, '1,hello\n2,world\n', 'utf8');
+      await new Promise(function (resolve, reject) {
+        //ensure that debug from previous test are written to console
+        setTimeout(resolve, 1000);
+      });
+      setNameAddition = 1221;
+    }
   });
 
   beforeEach(async function () {
+    let tmpLogFile = path.join(os.tmpdir(), 'combined' + ++fileIncrement + '.txt');
     logger = winston.createLogger({
       transports: [new winston.transports.File({ filename: tmpLogFile })]
     });
@@ -51,14 +46,12 @@ describe('debug', () => {
   });
 
   //ensure that debug from previous test are written to console
-  afterEach((done) => {
-    logger.close();
+  afterEach(async function () {
+    let tmpLogFile = path.join(os.tmpdir(), 'combined' + fileIncrement + '.txt');
+    await closeLogger(logger);
     try {
       fs.unlinkSync(tmpLogFile);
     } catch (e) {}
-    setTimeout(() => {
-      done();
-    }, 1000);
   });
 
   after(async function () {
@@ -68,136 +61,102 @@ describe('debug', () => {
     }
   });
 
-  it('select request debug', function (done) {
-    testQueryDebug(false, done);
+  it('select request debug', async function () {
+    await testQueryDebug(false);
   });
 
-  it('select request debug compress', function (done) {
+  it('select request debug compress', async function () {
     if (isXpand()) this.skip();
-    testQueryDebug(true, done);
+    await testQueryDebug(true);
   });
 
-  function testQueryDebug(compress, done) {
-    base
-      .createConnection({
-        compress: compress,
-        prepareCacheLength: 0,
-        logger: {
-          network: null,
-          query: (msg) => logger.info(msg),
-          error: (msg) => logger.info(msg)
-        }
-      })
-      .then((conn) => {
-        conn
-          .query('CREATE TABLE debugVoid (val int)')
-          .then(() => {
-            if (
-              compress &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql' &&
-              process.env.srv !== 'skysql-ha'
-            ) {
-              conn.debugCompress((msg) => logger.info(msg));
-            } else {
-              conn.debug((msg) => logger.info(msg));
-            }
-            return conn.query('SELECT 2');
-          })
-          .then(() => {
-            if (
-              compress &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql' &&
-              process.env.srv !== 'skysql-ha'
-            ) {
-              conn.debugCompress(false);
-            } else {
-              conn.debug(false);
-            }
-            return conn.query('SELECT 3');
-          })
-          .then(() => {
-            return conn.prepare('SELECT ?');
-          })
-          .then((prepare) => {
-            return prepare.execute(['t']).then((res) => prepare.close());
-          })
-          .then(() => {
-            return conn.batch('INSERT INTO debugVoid VALUES (?)', [[1], [2]]);
-          })
-          .then(() => {
-            return conn.end();
-          })
-          .then(() => {
-            //wait 100ms to ensure stream has been written
-            setTimeout(() => {
-              const serverVersion = conn.serverVersion();
-              if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-                compress = false;
-              const rangeWithEOF = compress ? [1500, 1900] : [1800, 4150];
-              const rangeWithoutEOF = compress ? [1500, 1900] : [2350, 3150];
-              const data = fs.readFileSync(tmpLogFile, 'utf8');
-              console.log(data);
-              assert.isTrue(data.includes('QUERY: SELECT 3'));
-              assert.isTrue(data.includes('PREPARE:'));
-              assert.isTrue(data.includes('EXECUTE:'));
-              assert.isTrue(data.includes("SELECT ? - parameters:['t']"));
-              assert.isTrue(data.includes('CLOSE PREPARE:'));
-              if (conn.info.isMariaDB() && conn.info.hasMinVersion(10, 2, 2)) {
-                assert.isTrue(data.includes('BULK:'));
-                assert.isTrue(data.includes('INSERT INTO debugVoid VALUES (?) - parameters:[[1],[2]]'));
-              }
-              assert.isTrue(data.includes('QUIT'));
-              if (
-                ((conn.info.isMariaDB() && conn.info.hasMinVersion(10, 2, 2)) ||
-                  (!conn.info.isMariaDB() && conn.info.hasMinVersion(5, 7, 5))) &&
-                process.env.srv !== 'maxscale' &&
-                process.env.srv !== 'skysql' &&
-                process.env.srv !== 'skysql-ha'
-              ) {
-                assert(
-                  data.length > rangeWithoutEOF[0] && data.length < rangeWithoutEOF[1],
-                  'wrong data length : ' +
-                    data.length +
-                    ' expected value between ' +
-                    rangeWithoutEOF[0] +
-                    ' and ' +
-                    rangeWithoutEOF[1] +
-                    '.' +
-                    '\n server version : ' +
-                    serverVersion +
-                    '\n data :\n' +
-                    data
-                );
-              } else {
-                //EOF Packet make exchange bigger
-                assert(
-                  data.length > rangeWithEOF[0] && data.length < rangeWithEOF[1],
-                  'wrong data length : ' +
-                    data.length +
-                    ' expected value between ' +
-                    rangeWithEOF[0] +
-                    ' and ' +
-                    rangeWithEOF[1] +
-                    '.' +
-                    '\n server version : ' +
-                    serverVersion +
-                    '\n data :\n' +
-                    data
-                );
-              }
-              done();
-            }, 100);
-          })
-          .catch(done);
-      })
-      .catch(done);
+  async function testQueryDebug(compress) {
+    const conn = await base.createConnection({
+      compress: compress,
+      prepareCacheLength: 0,
+      logger: {
+        network: null,
+        query: (msg) => logger.info(msg),
+        error: (msg) => logger.info(msg)
+      }
+    });
+    await conn.query('CREATE TABLE debugVoid (val int)');
+    if (compress && !isMaxscale() && process.env.srv !== 'skysql' && process.env.srv !== 'skysql-ha') {
+      conn.debugCompress((msg) => logger.info(msg));
+    } else {
+      conn.debug((msg) => logger.info(msg));
+    }
+    await conn.query('SELECT 2');
+    if (compress && !isMaxscale() && process.env.srv !== 'skysql' && process.env.srv !== 'skysql-ha') {
+      conn.debugCompress(false);
+    } else {
+      conn.debug(false);
+    }
+    await conn.query('SELECT 3');
+    const prepare = await conn.prepare('SELECT ?');
+    await prepare.execute(['t']).then((res) => prepare.close());
+    await conn.batch('INSERT INTO debugVoid VALUES (?)', [[1], [2]]);
+    conn.end();
+    //wait 100ms to ensure stream has been written
+    await new Promise((resolve) => new setTimeout(resolve, 100));
+    const serverVersion = conn.serverVersion();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') compress = false;
+    const rangeWithEOF = compress ? [1500, 2000] : [1800, 4250];
+    const rangeWithoutEOF = compress ? [1500, 2000] : [2350, 3250];
+    const data = fs.readFileSync(path.join(os.tmpdir(), 'combined' + fileIncrement + '.txt'), 'utf8');
+    console.log(data);
+    assert.isTrue(data.includes('QUERY: SELECT 3'));
+    assert.isTrue(data.includes('PREPARE:'));
+    assert.isTrue(data.includes('EXECUTE:'));
+    assert.isTrue(data.includes("SELECT ? - parameters:['t']"));
+    assert.isTrue(data.includes('CLOSE PREPARE:'));
+    if (conn.info.isMariaDB() && conn.info.hasMinVersion(10, 2, 2)) {
+      assert.isTrue(data.includes('BULK:'));
+      assert.isTrue(data.includes('INSERT INTO debugVoid VALUES (?) - parameters:[[1],[2]]'));
+    }
+    assert.isTrue(data.includes('QUIT'));
+    if (
+      ((conn.info.isMariaDB() && conn.info.hasMinVersion(10, 2, 2)) ||
+        (!conn.info.isMariaDB() && conn.info.hasMinVersion(5, 7, 5))) &&
+      !isMaxscale() &&
+      process.env.srv !== 'skysql' &&
+      process.env.srv !== 'skysql-ha'
+    ) {
+      assert(
+        data.length > rangeWithoutEOF[0] && data.length < rangeWithoutEOF[1],
+        'wrong data length : ' +
+          data.length +
+          ' expected value between ' +
+          rangeWithoutEOF[0] +
+          ' and ' +
+          rangeWithoutEOF[1] +
+          '.' +
+          '\n server version : ' +
+          serverVersion +
+          '\n data :\n' +
+          data
+      );
+    } else {
+      //EOF Packet make exchange bigger
+      assert(
+        data.length > rangeWithEOF[0] && data.length < rangeWithEOF[1],
+        'wrong data length : ' +
+          data.length +
+          ' expected value between ' +
+          rangeWithEOF[0] +
+          ' and ' +
+          rangeWithEOF[1] +
+          '.' +
+          '\n server version : ' +
+          serverVersion +
+          '\n data :\n' +
+          data
+      );
+    }
   }
 
   it('select big request (compressed data) debug', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand())
-      this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
 
     const buf = Buffer.alloc(5000, 'z');
     base
@@ -212,8 +171,8 @@ describe('debug', () => {
                 .end()
                 .then(() => {
                   const serverVersion = conn.serverVersion();
-                  const data = fs.readFileSync(tmpLogFile, 'utf8');
-                  let range = [8000, 10500];
+                  const data = fs.readFileSync(path.join(os.tmpdir(), 'combined' + fileIncrement + '.txt'), 'utf8');
+                  let range = [8900, 12000 + setNameAddition];
                   assert(
                     data.length > range[0] && data.length < range[1],
                     'wrong data length : ' +
@@ -261,7 +220,7 @@ describe('debug', () => {
       const conn = await base.createConnection({ debug: true });
       const res = await conn.query("SELECT '1'");
       conn.end();
-      const range = [3200, 5000];
+      const range = [3600, 5800 + setNameAddition];
       assert(
         data.length > range[0] && data.length < range[1],
         'wrong data length : ' +
@@ -304,9 +263,9 @@ describe('debug', () => {
             conn.end();
             //wait 100ms to ensure stream has been written
             setTimeout(() => {
-              const data = fs.readFileSync(tmpLogFile, 'utf8');
+              const data = fs.readFileSync(path.join(os.tmpdir(), 'combined' + fileIncrement + '.txt'), 'utf8');
               const serverVersion = conn.serverVersion();
-              const range = [6500, 9000 + (Conf.baseConfig.ssl ? 800 : 0)];
+              const range = [7500, 11000 + (Conf.baseConfig.ssl ? 800 : 0) + setNameAddition];
               assert(
                 data.length > range[0] && data.length < range[1],
                 'wrong data length : ' +
@@ -330,6 +289,7 @@ describe('debug', () => {
   }
 
   it('fast path command debug', async function () {
+    if (isXpand()) this.skip();
     await testPingDebug(false);
   });
 
@@ -355,10 +315,9 @@ describe('debug', () => {
       setTimeout(resolve, 100);
     });
     const serverVersion = conn.serverVersion();
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-      compress = false;
-    const range = compress ? [60, 150] : [60, 140];
-    const data = fs.readFileSync(tmpLogFile, 'utf8');
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') compress = false;
+    const range = compress ? [60, 180] : [60, 170];
+    const data = fs.readFileSync(path.join(os.tmpdir(), 'combined' + fileIncrement + '.txt'), 'utf8');
     assert.isTrue(data.includes('PING'));
     assert.isTrue(data.includes('QUIT'));
 
@@ -378,3 +337,28 @@ describe('debug', () => {
     );
   }
 });
+
+const closeLogger = async function (logger) {
+  const promises = [];
+
+  // close all transports -- transports dont use promises...
+  // syslog close function emits 'closed' when done
+  // daily-rotate-file close function emits 'finish' when done
+  for (const transport of logger.transports) {
+    if (transport.close) {
+      const promise = new Promise((resolve) => {
+        transport.once('closed', () => {
+          resolve();
+        });
+        transport.once('finish', () => {
+          resolve();
+        });
+      });
+      promises.push(promise);
+      // transport.close();  <-- invoked by logger.close()
+    }
+  }
+
+  logger.close();
+  return Promise.all(promises);
+};

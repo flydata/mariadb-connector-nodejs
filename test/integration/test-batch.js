@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -15,7 +18,7 @@ describe('batch', function () {
   const testSize = 16 * 1024 * 1024 + 80; // more than one packet
   let maxAllowedSize, bigBuf, timezoneParam;
   let supportBulk;
-  const RUN_LONG_TEST = process.env.RUN_LONG_TEST == '1';
+  const RUN_LONG_TEST = process.env.RUN_LONG_TEST === '1';
   this.timeout(30000);
   before(async function () {
     timezoneParam = 'America/New_York';
@@ -45,6 +48,129 @@ describe('batch', function () {
     });
   });
 
+  const batchMetaAsArray = async () => {
+    try {
+      const conn = await base.createConnection({ bulk: false, metaAsArray: true });
+      conn.query('DROP TABLE IF EXISTS batchMetaAsArray');
+      conn.query(
+        'CREATE TABLE batchMetaAsArray(id int, id2 boolean, id3 int, t varchar(128), d datetime, d2 datetime(6), g POINT, id4 int) CHARSET utf8mb4'
+      );
+      await conn.query('FLUSH TABLES');
+      await conn.beginTransaction();
+
+      const f = {};
+      f.toSqlString = () => {
+        return 'blabla';
+      };
+      let res = await conn.batch('INSERT INTO `batchMetaAsArray` values (1, ?, 2, ?, ?, ?, ?, 3)', [
+        [
+          true,
+          'Ʉjo"h\u000An😎🌶\\\\',
+          new Date('2001-12-31 23:59:58+3'),
+          new Date('2018-01-01 12:30:20.456789+3'),
+          {
+            type: 'Point',
+            coordinates: [10, 10]
+          }
+        ],
+        [
+          true,
+          f,
+          new Date('2001-12-31 23:59:58+3'),
+          new Date('2018-01-01 12:30:20.456789+3'),
+          {
+            type: 'Point',
+            coordinates: [10, 10]
+          }
+        ],
+        [
+          false,
+          { name: 'jack\u000Aमस्', val: 'tt' },
+          null,
+          new Date('2018-01-21 11:30:20.123456+3'),
+          {
+            type: 'Point',
+            coordinates: [10, 20]
+          }
+        ],
+        [
+          0,
+          null,
+          new Date('2020-12-31 23:59:59+3'),
+          new Date('2018-01-21 11:30:20.123456+3'),
+          {
+            type: 'Point',
+            coordinates: [20, 20]
+          }
+        ]
+      ]);
+      assert.equal(res.length, 2);
+      assert.equal(res[0].affectedRows, 4);
+      res = await conn.query('select * from `batchMetaAsArray`');
+      assert.deepEqual(res[0], [
+        {
+          id: 1,
+          id2: 1,
+          id3: 2,
+          t: 'Ʉjo"h\u000An😎🌶\\\\',
+          d: new Date('2001-12-31 23:59:58+3'),
+          d2: new Date('2018-01-01 12:30:20.456789+3'),
+          g: {
+            type: 'Point',
+            coordinates: [10, 10]
+          },
+          id4: 3
+        },
+        {
+          id: 1,
+          id2: 1,
+          id3: 2,
+          t: 'blabla',
+          d: new Date('2001-12-31 23:59:58+3'),
+          d2: new Date('2018-01-01 12:30:20.456789+3'),
+          g: {
+            type: 'Point',
+            coordinates: [10, 10]
+          },
+          id4: 3
+        },
+        {
+          id: 1,
+          id2: 0,
+          id3: 2,
+          t: '{"name":"jack\\nमस्","val":"tt"}',
+          d: null,
+          d2: new Date('2018-01-21 11:30:20.123456+3'),
+          g: {
+            type: 'Point',
+            coordinates: [10, 20]
+          },
+          id4: 3
+        },
+        {
+          id: 1,
+          id2: 0,
+          id3: 2,
+          t: null,
+          d: new Date('2020-12-31 23:59:59+3'),
+          d2: new Date('2018-01-21 11:30:20.123456+3'),
+          g: {
+            type: 'Point',
+            coordinates: [20, 20]
+          },
+          id4: 3
+        }
+      ]);
+      await conn.query('ROLLBACK');
+
+      conn.query('DROP TABLE simpleBatch');
+      const rows = await conn.query({ sql: 'select 1', bigIntAsNumber: true });
+      assert.deepEqual(rows[0], [{ 1: 1 }]);
+      await conn.end();
+    } catch (err) {
+      assert.equal(err.errno, 45033);
+    }
+  };
   const simpleBatch = async (useCompression, useBulk, timezone) => {
     try {
       const conn = await base.createConnection({
@@ -682,6 +808,11 @@ describe('batch', function () {
           err.message.includes('This command is not supported in the prepared statement protocol yet'),
           err.message
         );
+        // ensure option is taken in account
+        await conn.batch({ bulk: false, sql: 'SELECT ? as id, ? as t' }, [
+          [1, 'john'],
+          [2, 'jack']
+        ]);
       }
     }
     await conn.end();
@@ -717,6 +848,42 @@ describe('batch', function () {
       'select COUNT(DISTINCT id2) as a FROM `bigBatchWith16mMaxAllowedPacket` WHERE id2 >= 0 and id2 < 1000000'
     );
     assert.equal(res[0].a, 1000000);
+
+    await conn.query('ROLLBACK');
+    await conn.end();
+  };
+
+  const bigBatchWith16mMaxAllowedPacketBig = async (useCompression, useBulk) => {
+    const conn = await base.createConnection({
+      compress: useCompression,
+      maxAllowedPacket: 16 * 1024 * 1024,
+      bulk: useBulk
+    });
+    conn.query('DROP TABLE IF EXISTS bigBatchWith16mMaxAllowedPacketBig');
+    conn.query('CREATE TABLE bigBatchWith16mMaxAllowedPacketBig(id int, t LONGTEXT) CHARSET utf8mb4');
+    await conn.query('FLUSH TABLES');
+    await conn.query('START TRANSACTION');
+    const testSize = 15 * 1024 * 1024;
+    const buf = Buffer.alloc(testSize);
+    for (let i = 0; i < testSize; i++) {
+      buf[i] = 97 + (i % 10);
+    }
+    const str = buf.toString();
+    const values = [];
+    for (let i = 0; i < 5; i++) {
+      values.push([i, str]);
+    }
+    let res = await conn.batch('INSERT INTO `bigBatchWith16mMaxAllowedPacketBig` values (?, ?)', values);
+    assert.equal(res.affectedRows, 5);
+
+    res = await conn.query('select * from `bigBatchWith16mMaxAllowedPacketBig`');
+    assert.deepEqual(res, [
+      { id: 0, t: str },
+      { id: 1, t: str },
+      { id: 2, t: str },
+      { id: 3, t: str },
+      { id: 4, t: str }
+    ]);
 
     await conn.query('ROLLBACK');
     await conn.end();
@@ -1132,6 +1299,16 @@ describe('batch', function () {
       await simpleBatch(useCompression, true, 'local');
     });
 
+    it('batch meta as array', async function () {
+      if (!base.utf8Collation() || isXpand()) {
+        this.skip();
+        return;
+      }
+      this.timeout(30000);
+      if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
+      await batchMetaAsArray();
+    });
+
     it('simple batch, meta as Array', async function () {
       if (!base.utf8Collation() || isXpand()) {
         this.skip();
@@ -1185,6 +1362,7 @@ describe('batch', function () {
       const conn = await base.createConnection({ compress: useCompression, bulk: true });
       await conn.query('DROP TABLE IF EXISTS blabla');
       await conn.query('CREATE TABLE blabla(i int, i2 int)');
+      await conn.beginTransaction();
       await conn.batch('INSERT INTO `blabla` values (?, ?)', [
         [1, 2],
         [1, undefined]
@@ -1194,7 +1372,8 @@ describe('batch', function () {
         { i: 1, i2: 2 },
         { i: 1, i2: null }
       ]);
-      conn.query('DROP TABLE IF EXISTS blabla');
+      await conn.commit();
+      await conn.query('DROP TABLE IF EXISTS blabla');
       conn.end();
     });
 
@@ -1258,11 +1437,17 @@ describe('batch', function () {
     });
 
     it('16M+ batch with 16M max_allowed_packet', async function () {
-      // // skipping in maxscale due to a bug: https://jira.mariadb.org/browse/MXS-3588
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+      if (process.env.srv === 'skysql-ha') this.skip();
       if (!RUN_LONG_TEST || maxAllowedSize <= testSize) return this.skip();
       this.timeout(320000);
       await bigBatchWith16mMaxAllowedPacket(useCompression, true);
+    });
+
+    it('16M+ batch with 16M max_allowed_packet big insert', async function () {
+      if (process.env.srv === 'skysql-ha') this.skip();
+      if (!RUN_LONG_TEST || maxAllowedSize <= testSize) return this.skip();
+      this.timeout(320000);
+      await bigBatchWith16mMaxAllowedPacketBig(useCompression, true);
     });
 
     it('16M+ batch with max_allowed_packet set to 4M', async function () {
@@ -1345,8 +1530,7 @@ describe('batch', function () {
     });
 
     it('16M+ batch with 16M max_allowed_packet', async function () {
-      // skipping in maxscale due to a bug: https://jira.mariadb.org/browse/MXS-3588
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+      if (process.env.srv === 'skysql-ha') this.skip();
       if (!RUN_LONG_TEST) this.skip();
       if (maxAllowedSize <= testSize) this.skip();
       this.timeout(180000);
@@ -1451,6 +1635,7 @@ describe('batch', function () {
       const conn = await base.createConnection({ compress: useCompression, bulk: false });
       await conn.query('DROP TABLE IF EXISTS blabla');
       await conn.query('CREATE TABLE blabla(i int, i2 int)');
+      await conn.beginTransaction();
       await conn.batch('INSERT INTO `blabla` values (?,?)', [
         [1, 2],
         [1, undefined]
@@ -1461,6 +1646,7 @@ describe('batch', function () {
         { i: 1, i2: null }
       ]);
       await conn.query('DROP TABLE IF EXISTS blabla');
+      await conn.commit();
       await conn.end();
     });
 
@@ -1524,8 +1710,7 @@ describe('batch', function () {
     });
 
     it('16M+ batch with 16M max_allowed_packet', async function () {
-      // skipping in maxscale due to a bug: https://jira.mariadb.org/browse/MXS-3588
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+      if (process.env.srv === 'skysql-ha') this.skip();
       if (!RUN_LONG_TEST || maxAllowedSize <= testSize) return this.skip();
       this.timeout(320000);
       await bigBatchWith16mMaxAllowedPacket(useCompression, false);
@@ -1629,8 +1814,7 @@ describe('batch', function () {
     });
 
     it('16M+ batch with 16M max_allowed_packet', async function () {
-      // skipping in maxscale due to a bug: https://jira.mariadb.org/browse/MXS-3588
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+      if (process.env.srv === 'skysql-ha') this.skip();
       if (!RUN_LONG_TEST || maxAllowedSize <= testSize) return this.skip();
       this.timeout(380000);
       await bigBatchWith16mMaxAllowedPacket(useCompression, false);
@@ -1683,8 +1867,7 @@ describe('batch', function () {
     });
 
     it('16M+ batch', async function () {
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-        this.skip();
+      if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
       if (!RUN_LONG_TEST || maxAllowedSize <= testSize) return this.skip();
       this.timeout(320000);
       await more16MNamedPlaceHolders(true);
@@ -1714,8 +1897,7 @@ describe('batch', function () {
     });
 
     it('16M+ batch', async function () {
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-        this.skip();
+      if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
       if (!RUN_LONG_TEST || maxAllowedSize <= testSize) return this.skip();
       this.timeout(320000);
       await more16MNamedPlaceHolders(false);
@@ -1736,10 +1918,10 @@ describe('batch', function () {
 });
 
 function makeid(length) {
-  var result = '';
-  var characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  var charactersLength = characters.length;
-  for (var i = 0; i < length; i++) {
+  let result = '';
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const charactersLength = characters.length;
+  for (let i = 0; i < length; i++) {
     result += characters.charAt(Math.floor(Math.random() * charactersLength));
   }
   return result;

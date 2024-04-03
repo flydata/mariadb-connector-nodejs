@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const expect = require('chai').expect;
@@ -8,7 +11,7 @@ const Proxy = require('../tools/proxy');
 const base = require('../base.js');
 
 const { assert } = require('chai');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
 
 describe('cluster', function () {
   before(async function () {
@@ -395,8 +398,7 @@ describe('cluster', function () {
     });
 
     it('one node failing', async function () {
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-        this.skip();
+      if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
 
       this.timeout(30000);
       const cluster = basePromise.createPoolCluster({});
@@ -471,8 +473,7 @@ describe('cluster', function () {
     });
 
     it('one node failing with blacklisted host', async function () {
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-        this.skip();
+      if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
 
       this.timeout(30000);
       const cluster = basePromise.createPoolCluster({});
@@ -534,7 +535,7 @@ describe('cluster', function () {
               conn = null;
             }
             proxy.resume();
-
+            await new Promise((resolve) => new setTimeout(resolve, 500));
             conn = await cluster.getConnection('node*', 'ORDER');
             initTime = Date.now();
             await conn.query("SELECT '1'");
@@ -575,21 +576,22 @@ describe('cluster', function () {
 
       await proxy.close();
       //wait for socket to end.
-      await new Promise((resolve, reject) => {
-        new setTimeout(resolve, 500);
-      });
+      await new Promise((resolve) => new setTimeout(resolve, 500));
 
       nodes = await testTimesWithError(cluster, /^node*/, 10);
       await proxy.resume();
       assert.deepEqual(nodes, { node1: 5, node3: 5 }, `wrong value: ${nodes} , expected { node1: 5, node3: 5 }`);
-      await new Promise((resolve, reject) => {
-        new setTimeout(resolve, 500);
-      });
+      await new Promise((resolve) => new setTimeout(resolve, 500));
       expect(removedNode).to.have.length(0);
-      await new Promise((resolve, reject) => {
-        new setTimeout(resolve, 2000);
-      });
+      await new Promise((resolve) => new setTimeout(resolve, 2000));
       let node2s = await testTimesWithError(cluster, /^node*/, 10);
+
+      if (node2s['node2'] === 0) {
+        // in case of pool reconnection taking longer
+        await new Promise((resolve) => new setTimeout(resolve, 2000));
+        let node2s = await testTimesWithError(cluster, /^node*/, 10);
+      }
+
       await cluster.end();
       await proxy.close();
       expect([3, 4]).to.contain.members([node2s['node1']]);
@@ -598,13 +600,7 @@ describe('cluster', function () {
     });
 
     it('server close connection during query', function (done) {
-      if (
-        process.env.srv === 'maxscale' ||
-        process.env.srv === 'skysql' ||
-        process.env.srv === 'skysql-ha' ||
-        isXpand()
-      )
-        this.skip();
+      if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
       this.timeout(20000);
       const cluster = basePromise.createPoolCluster({});
 
@@ -643,8 +639,7 @@ describe('cluster', function () {
     });
 
     it('socket close connection during query', function (done) {
-      if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha')
-        this.skip();
+      if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
       if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 2)) this.skip();
       this.timeout(10000);
       const cluster = basePromise.createPoolCluster({});
@@ -965,7 +960,7 @@ describe('cluster', function () {
               done(new Error('must have thrown an error !'));
             } else {
               expect(err.message).to.have.string(
-                "No Connection available for 'PoolNode-0'. Last connection error was: (conn=-1, no: 45028, SQLState: HY000) retrieve connection from pool timeout after"
+                "No Connection available for 'PoolNode-0'. Last connection error was: (conn:-1, no: 45028, SQLState: HY000) retrieve connection from pool timeout after"
               );
               conn.end();
               cluster.end();

@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -135,7 +138,7 @@ describe('transaction', () => {
     assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
     await shareConn.commit();
     assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 0);
-    if (process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha') {
+    if (process.env.srv !== 'skysql-ha') {
       const rows = await shareConn.query('SELECT count(*) as nb FROM testTransaction');
       assert.equal(shareConn.info.status & ServerStatus.STATUS_IN_TRANS, 1);
       assert.equal(rows[0].nb, 1);

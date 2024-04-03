@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const { assert } = require('chai');
@@ -35,6 +38,7 @@ describe('test options', () => {
       socketPath: undefined,
       sessionVariables: undefined,
       ssl: undefined,
+      infileStreamFactory: undefined,
       queryTimeout: 0,
       socketTimeout: 0,
       keepAliveDelay: 0,
@@ -50,8 +54,9 @@ describe('test options', () => {
         error: null,
         network: null,
         query: null,
-        logParam: false
+        warning: console.log
       },
+      logParam: true,
       metaAsArray: false,
       metaEnumerable: false,
       multipleStatements: false,
@@ -67,9 +72,11 @@ describe('test options', () => {
       stream: undefined,
       bigIntAsNumber: false,
       bulk: true,
+      keepEof: false,
       permitLocalInfile: false,
       bigNumberStrings: false,
-      supportBigNumbers: false
+      supportBigNumbers: false,
+      permitRedirect: true
     };
     assert.deepEqual(expected, defaultOpts);
     assert.deepEqual(expected, defaultOptsCall);

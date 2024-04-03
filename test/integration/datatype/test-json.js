@@ -1,7 +1,11 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../../base.js');
 const { assert } = require('chai');
+const Capabilities = require('../../../lib/const/capabilities');
 
 describe('json', () => {
   it('json escape', async function () {
@@ -27,10 +31,14 @@ describe('json', () => {
   });
 
   const testJsonInsertFormat = async function (conn) {
+    const serverPermitExtendedInfos =
+      (conn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+
     const obj = { id: 2, val: 'tes\\t' };
     const obj2 = { id: 3, val: 'test3' };
     await conn.query('DROP TABLE IF EXISTS `test-json-insert-type`');
     await conn.query('CREATE TABLE `test-json-insert-type` (val1 JSON)');
+    await conn.beginTransaction();
     await conn.query(
       {
         stringifyObjects: true,
@@ -48,11 +56,7 @@ describe('json', () => {
     await conn.query('INSERT INTO `test-json-insert-type` values (?)', [JSON.stringify(obj2)]);
     await conn.execute('INSERT INTO `test-json-insert-type` values (?)', [JSON.stringify(obj2)]);
     const rows = await conn.query('SELECT * FROM `test-json-insert-type`');
-    if (
-      (conn.info.isMariaDB() && !conn.info.hasMinVersion(10, 5, 2)) ||
-      process.env.srv === 'maxscale' ||
-      process.env.srv === 'skysql-ha'
-    ) {
+    if (!serverPermitExtendedInfos && conn.info.isMariaDB()) {
       const val1 = JSON.parse(rows[0].val1);
       const val2 = JSON.parse(rows[1].val1);
       const val3 = JSON.parse(rows[2].val1);
@@ -75,6 +79,7 @@ describe('json', () => {
       assert.equal(rows[3].val1.id, 3);
       assert.equal(rows[3].val1.val, 'test3');
     }
+    await conn.commit();
   };
 
   it('select json format', async function () {
@@ -88,20 +93,17 @@ describe('json', () => {
 
     const obj = { id: 2, val: 'test' };
     const jsonString = JSON.stringify(obj);
-
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
     await shareConn.query('DROP TABLE IF EXISTS `test-json-return-type`');
     await shareConn.query('CREATE TABLE `test-json-return-type` (val1 JSON, val2 LONGTEXT, val3 LONGBLOB)');
+    await shareConn.beginTransaction();
     await shareConn.query(
       "INSERT INTO `test-json-return-type` values ('" + jsonString + "','" + jsonString + "','" + jsonString + "')"
     );
     let rows = await shareConn.query('SELECT * FROM `test-json-return-type`');
     if (shareConn.info.isMariaDB()) {
-      if (
-        shareConn.info.isMariaDB() &&
-        shareConn.info.hasMinVersion(10, 5, 2) &&
-        process.env.srv !== 'maxscale' &&
-        process.env.srv !== 'skysql-ha'
-      ) {
+      if (serverPermitExtendedInfos) {
         assert.deepEqual(rows[0].val1, obj);
       } else {
         assert.equal(rows[0].val1, jsonString);
@@ -115,12 +117,7 @@ describe('json', () => {
 
     rows = await shareConn.execute('SELECT * FROM `test-json-return-type`');
     if (shareConn.info.isMariaDB()) {
-      if (
-        shareConn.info.isMariaDB() &&
-        shareConn.info.hasMinVersion(10, 5, 2) &&
-        process.env.srv !== 'maxscale' &&
-        process.env.srv !== 'skysql-ha'
-      ) {
+      if (serverPermitExtendedInfos) {
         assert.deepEqual(rows[0].val1, obj);
       } else {
         assert.equal(rows[0].val1, jsonString);
@@ -131,17 +128,14 @@ describe('json', () => {
     }
     assert.equal(rows[0].val2, jsonString);
     assert.equal(rows[0].val3, jsonString);
+    await shareConn.commit();
   });
 
   it('disable json format', async function () {
     //server permit JSON format
-    if (
-      (shareConn.info.isMariaDB() &&
-        (!shareConn.info.hasMinVersion(10, 5, 2) ||
-          process.env.srv === 'maxscale' ||
-          process.env.srv === 'skysql-ha')) ||
-      !shareConn.info.isMariaDB()
-    ) {
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+    if ((shareConn.info.isMariaDB() && serverPermitExtendedInfos) || !shareConn.info.isMariaDB()) {
       this.skip();
     }
     const conn = await base.createConnection({ autoJsonMap: false });
@@ -149,6 +143,7 @@ describe('json', () => {
     const jsonString = JSON.stringify(obj);
     await conn.query('DROP TABLE IF EXISTS `test-json-return-type`');
     await conn.query('CREATE TABLE `test-json-return-type` (val1 JSON, val2 LONGTEXT, val3 LONGBLOB)');
+    await conn.beginTransaction();
     await conn.query(
       "INSERT INTO `test-json-return-type` values ('" + jsonString + "','" + jsonString + "','" + jsonString + "')"
     );

@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../../base.js');
@@ -11,13 +14,16 @@ describe('integer with big value', () => {
     await shareConn.query('CREATE TABLE testInt (v INT NOT NULL AUTO_INCREMENT PRIMARY KEY)');
     await shareConn.query('CREATE TABLE testBigint (v BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY)');
     await shareConn.query('DROP TABLE IF EXISTS floatTest');
+    await shareConn.query('DROP TABLE IF EXISTS floatTestUnsigned');
     await shareConn.query('CREATE TABLE floatTest (t DOUBLE, t2 DECIMAL(32,16), t3 DECIMAL(32,0))');
+    await shareConn.query('CREATE TABLE floatTestUnsigned (t DOUBLE, t2 DECIMAL(32,16), t3 BIGINT(32) UNSIGNED)');
   });
 
   after(async () => {
     await shareConn.query('DROP TABLE IF EXISTS testBigint');
     await shareConn.query('DROP TABLE IF EXISTS testInt');
-    await shareConn.query('DROP TABLE IF EXISTS floatTest');
+    // await shareConn.query('DROP TABLE IF EXISTS floatTest');
+    await shareConn.query('DROP TABLE IF EXISTS floatTestUnsigned');
   });
 
   it('int escape', async function () {
@@ -39,6 +45,7 @@ describe('integer with big value', () => {
 
   it('decimal value without truncation', async function () {
     if (isXpand()) this.skip();
+    await shareConn.beginTransaction();
     await shareConn.query(
       'INSERT INTO floatTest VALUES (-0.1, 128.3, 129), (-0.9999237060546875, 9999237060546875.9999237060546875, 9999237060546875)'
     );
@@ -70,6 +77,24 @@ describe('integer with big value', () => {
     rows = await shareConn.execute({ sql: 'SELECT * FROM floatTest', decimalAsNumber: true });
     assert.deepEqual(rows, expectedNumber);
 
+    const expectedNumberConvert = [
+      {
+        t: -0.1,
+        t2: 128.3,
+        t3: 129
+      },
+      {
+        t: -0.9999237060546875,
+        t2: '9999237060546875.9999237060546875',
+        t3: '9999237060546875'
+      }
+    ];
+    rows = await shareConn.query({ sql: 'SELECT * FROM floatTest', decimalAsNumber: true, supportBigNumbers: true });
+    assert.deepEqual(rows, expectedNumberConvert);
+
+    rows = await shareConn.execute({ sql: 'SELECT * FROM floatTest', decimalAsNumber: true, supportBigNumbers: true });
+    assert.deepEqual(rows, expectedNumberConvert);
+
     try {
       await shareConn.query({ sql: 'SELECT * FROM floatTest', decimalAsNumber: true, checkNumberRange: true });
       throw new Error('Expected to have failed');
@@ -87,7 +112,7 @@ describe('integer with big value', () => {
     const expectedBigNumber = [
       {
         t: -0.1,
-        t2: '128.3000000000000000',
+        t2: 128.3,
         t3: 129
       },
       { t: -0.9999237060546875, t2: '9999237060546875.9999237060546875', t3: '9999237060546875' }
@@ -119,23 +144,113 @@ describe('integer with big value', () => {
       bigNumberStrings: true
     });
     assert.deepEqual(rows, expectedBigNumberString);
+    await shareConn.commit();
+  });
+
+  it('decimal value without truncation unsigned', async function () {
+    if (isXpand()) this.skip();
+    await shareConn.beginTransaction();
+    await shareConn.query(
+      'INSERT INTO floatTestUnsigned VALUES (0.1, 128.3, 129), (0.9999237060546875, 9999237060546875.9999237060546875, 9999237060546875)'
+    );
+    const expected = [
+      {
+        t: 0.1,
+        t2: '128.3000000000000000',
+        t3: 129n
+      },
+      { t: 0.9999237060546875, t2: '9999237060546875.9999237060546875', t3: 9999237060546875n }
+    ];
+    let rows = await shareConn.query(' SELECT * FROM floatTestUnsigned');
+    assert.deepEqual(rows, expected);
+
+    rows = await shareConn.execute(' SELECT * FROM floatTestUnsigned');
+    assert.deepEqual(rows, expected);
+
+    const expectedNumber = [
+      {
+        t: 0.1,
+        t2: 128.3,
+        t3: 129n
+      },
+      { t: 0.9999237060546875, t2: 9999237060546875.9999237060546875, t3: 9999237060546875n }
+    ];
+    rows = await shareConn.query({ sql: 'SELECT * FROM floatTestUnsigned', decimalAsNumber: true });
+    assert.deepEqual(rows, expectedNumber);
+
+    rows = await shareConn.execute({ sql: 'SELECT * FROM floatTestUnsigned', decimalAsNumber: true });
+    assert.deepEqual(rows, expectedNumber);
+
+    const expectedBigNumber0 = [
+      {
+        t: 0.1,
+        t2: 128.3,
+        t3: 129n
+      },
+      { t: 0.9999237060546875, t2: 9999237060546876, t3: 9999237060546875n }
+    ];
+
+    await shareConn.query({ sql: 'SELECT * FROM floatTestUnsigned', decimalAsNumber: true, checkNumberRange: true });
+    assert.deepEqual(rows, expectedBigNumber0);
+
+    await shareConn.execute({ sql: 'SELECT * FROM floatTestUnsigned', decimalAsNumber: true, checkNumberRange: true });
+    assert.deepEqual(rows, expectedBigNumber0);
+
+    const expectedBigNumber = [
+      {
+        t: 0.1,
+        t2: 128.3,
+        t3: 129
+      },
+      { t: 0.9999237060546875, t2: '9999237060546875.9999237060546875', t3: '9999237060546875' }
+    ];
+
+    rows = await shareConn.query({ sql: 'SELECT * FROM floatTestUnsigned', supportBigNumbers: true });
+    assert.deepEqual(rows, expectedBigNumber);
+
+    rows = await shareConn.execute({ sql: 'SELECT * FROM floatTestUnsigned', supportBigNumbers: true });
+    assert.deepEqual(rows, expectedBigNumber);
+
+    const expectedBigNumberString = [
+      {
+        t: 0.1,
+        t2: '128.3000000000000000',
+        t3: '129'
+      },
+      { t: 0.9999237060546875, t2: '9999237060546875.9999237060546875', t3: '9999237060546875' }
+    ];
+    rows = await shareConn.query({
+      sql: 'SELECT * FROM floatTestUnsigned',
+      supportBigNumbers: true,
+      bigNumberStrings: true
+    });
+    assert.deepEqual(rows, expectedBigNumberString);
+
+    rows = await shareConn.execute({
+      sql: 'SELECT * FROM floatTestUnsigned',
+      supportBigNumbers: true,
+      bigNumberStrings: true
+    });
+    assert.deepEqual(rows, expectedBigNumberString);
+    await shareConn.commit();
   });
 
   it('int format', async function () {
     if (isXpand()) this.skip();
-
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO testInt values (127), (128)');
     const rows = await shareConn.query('SELECT * FROM testInt');
     assert.deepEqual(rows, [{ v: 127 }, { v: 128 }]);
 
     const rows2 = await shareConn.execute('SELECT * FROM testInt');
     assert.deepEqual(rows2, [{ v: 127 }, { v: 128 }]);
+    await shareConn.commit();
   });
 
   it('bigint format', async function () {
     // https://jira.mariadb.org/browse/XPT-290
     if (isXpand()) this.skip();
-
+    await shareConn.beginTransaction();
     let rows = await shareConn.query('INSERT INTO testBigint values (127), (128)');
     assert.strictEqual(rows.insertId, BigInt(128));
 
@@ -486,19 +601,21 @@ describe('integer with big value', () => {
     assert.strictEqual(rows[1].v, null);
     assert.strictEqual(rows[2].v, 129);
     assert.strictEqual(rows[3].v, null);
+    await shareConn.commit();
   });
 
   it('numeric fields conversion to int', async () => {
     await shareConn.query('DROP TABLE IF EXISTS intAllField');
     await shareConn.query(
       'CREATE TABLE intAllField (' +
-        't1 TINYINT(1), t2 SMALLINT(1), t3 MEDIUMINT(1), t4 INT(1), t5 BIGINT(1), t6 DECIMAL(1), t7 FLOAT, t8 DOUBLE)'
+        't1 TINYINT(1), t2 SMALLINT(1), t3 MEDIUMINT(1), t4 MEDIUMINT(1) UNSIGNED, t5 INT(1), t6 BIGINT(1), t7 DECIMAL(1), t8 FLOAT, t9 DOUBLE)'
     );
-    await shareConn.query('INSERT INTO intAllField VALUES (null, null, null, null, null, null, null, null)');
-    await shareConn.execute('INSERT INTO intAllField VALUES (null, null, null, null, null, null, null, null)');
-    await shareConn.query('INSERT INTO intAllField VALUES (0, 0, 0, 0, 0, 0, 0, 0)');
-    await shareConn.query('INSERT INTO intAllField VALUES (1, 1, 1, 1, 1, 1, 1, 1)');
-    await shareConn.execute('INSERT INTO intAllField VALUES (2, 2, 2, 2, 2, 2, 2, 2)');
+    await shareConn.beginTransaction();
+    await shareConn.query('INSERT INTO intAllField VALUES (null, null, null, null, null, null, null, null, null)');
+    await shareConn.execute('INSERT INTO intAllField VALUES (null, null, null, null, null, null, null, null, null)');
+    await shareConn.query('INSERT INTO intAllField VALUES (0, 0, 0, 0, 0, 0, 0, 0, 0)');
+    await shareConn.query('INSERT INTO intAllField VALUES (1, 1, 1, 1, 1, 1, 1, 1, 1)');
+    await shareConn.execute('INSERT INTO intAllField VALUES (2, 2, 2, 2, 2, 2, 2, 2, 2)');
     const expected = [
       {
         t1: null,
@@ -508,7 +625,8 @@ describe('integer with big value', () => {
         t5: null,
         t6: null,
         t7: null,
-        t8: null
+        t8: null,
+        t9: null
       },
       {
         t1: null,
@@ -518,16 +636,18 @@ describe('integer with big value', () => {
         t5: null,
         t6: null,
         t7: null,
-        t8: null
+        t8: null,
+        t9: null
       },
-      { t1: 0, t2: 0, t3: 0, t4: 0, t5: BigInt('0'), t6: '0', t7: 0, t8: 0 },
-      { t1: 1, t2: 1, t3: 1, t4: 1, t5: BigInt('1'), t6: '1', t7: 1, t8: 1 },
-      { t1: 2, t2: 2, t3: 2, t4: 2, t5: BigInt('2'), t6: '2', t7: 2, t8: 2 }
+      { t1: 0, t2: 0, t3: 0, t4: 0, t5: 0, t6: BigInt('0'), t7: '0', t8: 0, t9: 0 },
+      { t1: 1, t2: 1, t3: 1, t4: 1, t5: 1, t6: BigInt('1'), t7: '1', t8: 1, t9: 1 },
+      { t1: 2, t2: 2, t3: 2, t4: 2, t5: 2, t6: BigInt('2'), t7: '2', t8: 2, t9: 2 }
     ];
     let res = await shareConn.query('SELECT * FROM intAllField');
     assert.deepEqual(res, expected);
     res = await shareConn.execute('SELECT * FROM intAllField');
     assert.deepEqual(res, expected);
+    await shareConn.commit();
   });
 
   it('using very big number', async function () {
@@ -535,6 +655,7 @@ describe('integer with big value', () => {
     const conn = await base.createConnection();
     await conn.query('DROP TABLE IF EXISTS BIG_NUMBER');
     await conn.query('CREATE TABLE BIG_NUMBER (val BIGINT unsigned)');
+    await conn.beginTransaction();
     await conn.query('INSERT INTO BIG_NUMBER values (?)', [10]);
     await conn.query('INSERT INTO BIG_NUMBER values (?)', [maxValue]);
     await conn.execute('INSERT INTO BIG_NUMBER values (?)', [maxValue]);

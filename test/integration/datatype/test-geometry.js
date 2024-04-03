@@ -1,16 +1,24 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../../base.js');
 const { assert } = require('chai');
 const { isXpand } = require('../../base');
+const Capabilities = require('../../../lib/const/capabilities');
 
 describe('geometry data type', () => {
   it('Point format', async function () {
     //MySQL 5.5 doesn't have ST_PointFromText function
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
     if (isXpand()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+
     await shareConn.query('DROP TABLE IF EXISTS gis_point');
     await shareConn.query('CREATE TABLE gis_point (g POINT)');
+    await shareConn.beginTransaction();
     await shareConn.query(
       'INSERT INTO gis_point VALUES\n' +
         '    (null),\n' +
@@ -21,13 +29,7 @@ describe('geometry data type', () => {
     );
     const expected = [
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Point' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Point' } : null
       },
       {
         g: {
@@ -65,6 +67,7 @@ describe('geometry data type', () => {
 
     rows = await shareConn.execute({ sql: 'SELECT * FROM gis_point', typeCast: (column, next) => column.geometry() });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('geometry escape', async function () {
@@ -179,10 +182,23 @@ describe('geometry data type', () => {
               [0, 0],
               [10, 10]
             ]
+          },
+          {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [10, 10],
+                [20, 10],
+                [20, 20],
+                [10, 20],
+                [10, 10]
+              ]
+            ]
           }
         ]
       }),
-      prefix + "GeomCollFromText('GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,10 10))')"
+      prefix +
+        "GeomCollFromText('GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,10 10),POLYGON((10 10,20 10,20 20,10 20,10 10)))')"
     );
   });
 
@@ -190,8 +206,11 @@ describe('geometry data type', () => {
     if (isXpand()) this.skip();
     //mysql < 8 doesn't permit sending empty data
     if (!shareConn.info.isMariaDB()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
     await shareConn.query('DROP TABLE IF EXISTS gis_point_insert');
     await shareConn.query('CREATE TABLE gis_point_insert (g POINT)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_point_insert VALUES (?)', [{ type: 'Point', coordinates: [10, 10] }]);
     await shareConn.execute('INSERT INTO gis_point_insert VALUES (?)', [{ type: 'Point', coordinates: [20, 10] }]);
     await shareConn.query('INSERT INTO gis_point_insert VALUES (?)', [{ type: 'Point', coordinates: [] }]);
@@ -210,28 +229,17 @@ describe('geometry data type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Point' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Point' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Point' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Point' } : null
       }
     ];
     let rows = await shareConn.query('SELECT * FROM gis_point_insert');
     assert.deepEqual(rows, expected);
     rows = await shareConn.execute('SELECT * FROM gis_point_insert');
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('LineString format', async function () {
@@ -240,6 +248,7 @@ describe('geometry data type', () => {
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
     await shareConn.query('DROP TABLE IF EXISTS gis_line');
     await shareConn.query('CREATE TABLE gis_line (g LINESTRING)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_line VALUES (?)', {
       type: 'LineString',
       coordinates: [
@@ -339,13 +348,18 @@ describe('geometry data type', () => {
     assert.deepEqual(rows, expected);
     rows = await shareConn.execute('SELECT * FROM gis_line');
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('LineString insert', async function () {
     if (isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+
     await shareConn.query('DROP TABLE IF EXISTS gis_line_insert');
     await shareConn.query('CREATE TABLE gis_line_insert (g LINESTRING)');
+    await shareConn.beginTransaction();
     await shareConn.execute('INSERT INTO gis_line_insert VALUES (?)', [
       {
         type: 'LineString',
@@ -387,22 +401,10 @@ describe('geometry data type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'LineString' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'LineString' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'LineString' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'LineString' } : null
       }
     ];
     let rows = await shareConn.query('SELECT * FROM gis_line_insert');
@@ -420,6 +422,7 @@ describe('geometry data type', () => {
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Polygon format', async function () {
@@ -428,6 +431,7 @@ describe('geometry data type', () => {
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
     await shareConn.query('DROP TABLE IF EXISTS gis_polygon');
     await shareConn.query('CREATE TABLE gis_polygon (g POLYGON)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_polygon VALUES (?)', [
       {
         type: 'Polygon',
@@ -564,14 +568,19 @@ describe('geometry data type', () => {
     assert.deepEqual(rows, expected);
     rows = await shareConn.execute({ sql: 'SELECT * FROM gis_polygon', typeCast: (column, next) => column.geometry() });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Polygon insert', async function () {
     if (isXpand()) this.skip();
     //mysql < 8 doesn't permit sending empty data
     if (!shareConn.info.isMariaDB()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+
     await shareConn.query('DROP TABLE IF EXISTS gis_polygon_insert');
     await shareConn.query('CREATE TABLE gis_polygon_insert (g POLYGON)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_polygon_insert VALUES (?)', [
       {
         type: 'Polygon',
@@ -657,37 +666,20 @@ describe('geometry data type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Polygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Polygon' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Polygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Polygon' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Polygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Polygon' } : null
       }
     ];
     let rows = await shareConn.query('SELECT * FROM gis_polygon_insert');
     assert.deepEqual(rows, expected);
     rows = await shareConn.execute('SELECT * FROM gis_polygon_insert');
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('MultiPoint format', async function () {
@@ -697,6 +689,7 @@ describe('geometry data type', () => {
 
     await shareConn.query('DROP TABLE IF EXISTS gis_multi_point');
     await shareConn.query('CREATE TABLE gis_multi_point (g MULTIPOINT)');
+    await shareConn.beginTransaction();
     await shareConn.query(
       'INSERT INTO gis_multi_point VALUES\n' +
         "    (ST_MultiPointFromText('MULTIPOINT(0 0,10 10,10 20,20 20)')),\n" +
@@ -751,15 +744,19 @@ describe('geometry data type', () => {
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('MultiPoint insert', async function () {
     if (isXpand()) this.skip();
     //mysql < 8 doesn't permit sending empty data
     if (!shareConn.info.isMariaDB()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
 
     await shareConn.query('DROP TABLE IF EXISTS gis_multi_point_insert');
     await shareConn.query('CREATE TABLE gis_multi_point_insert (g MULTIPOINT)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_multi_point_insert VALUES (?)', [
       {
         type: 'MultiPoint',
@@ -795,28 +792,17 @@ describe('geometry data type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPoint' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiPoint' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPoint' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiPoint' } : null
       }
     ];
     let rows = await shareConn.query('SELECT * FROM gis_multi_point_insert');
     assert.deepEqual(rows, expected);
     rows = await shareConn.execute('SELECT * FROM gis_multi_point_insert');
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Multi-line String format', async function () {
@@ -826,6 +812,7 @@ describe('geometry data type', () => {
 
     await shareConn.query('DROP TABLE IF EXISTS gis_multi_line');
     await shareConn.query('CREATE TABLE gis_multi_line (g MULTILINESTRING)');
+    await shareConn.beginTransaction();
     await shareConn.query(
       'INSERT INTO gis_multi_line VALUES\n' +
         "    (ST_MultiLineStringFromText('MULTILINESTRING((10 48,10 21,10 0),(16 0,16 23,16 48))')),\n" +
@@ -894,15 +881,19 @@ describe('geometry data type', () => {
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Multi-line insert', async function () {
     if (isXpand()) this.skip();
     //mysql < 8 doesn't permit sending empty data
     if (!shareConn.info.isMariaDB()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
 
     await shareConn.query('DROP TABLE IF EXISTS gis_multi_line_insert');
     await shareConn.query('CREATE TABLE gis_multi_line_insert (g MULTILINESTRING)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_multi_line_insert VALUES (?)', [
       {
         type: 'MultiLineString',
@@ -970,31 +961,13 @@ describe('geometry data type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiLineString' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiLineString' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiLineString' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiLineString' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiLineString' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiLineString' } : null
       }
     ];
 
@@ -1002,6 +975,7 @@ describe('geometry data type', () => {
     assert.deepEqual(rows, expected);
     rows = await shareConn.execute('SELECT * FROM gis_multi_line_insert');
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Multi-polygon format', async function () {
@@ -1011,6 +985,7 @@ describe('geometry data type', () => {
 
     await shareConn.query('DROP TABLE IF EXISTS gis_multi_polygon');
     await shareConn.query('CREATE TABLE gis_multi_polygon (g MULTIPOLYGON)');
+    await shareConn.beginTransaction();
     await shareConn.query(
       'INSERT INTO gis_multi_polygon VALUES\n' +
         "    (ST_MultiPolygonFromText('MULTIPOLYGON(((28 26,28 0,84 0,84 42,28 26),(52 18,66 23,73 9,48 6,52 18)),((59 18,67 18,67 13,59 13,59 18)))')),\n" +
@@ -1113,15 +1088,20 @@ describe('geometry data type', () => {
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Multi-polygon insert', async function () {
     if (isXpand()) this.skip();
+
     //mysql < 8 doesn't permit sending empty data
     if (!shareConn.info.isMariaDB()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
 
     await shareConn.query('DROP TABLE IF EXISTS gis_multi_polygon_insert');
     await shareConn.query('CREATE TABLE gis_multi_polygon_insert (g MULTIPOLYGON)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO gis_multi_polygon_insert VALUES (?)', [
       {
         type: 'MultiPolygon',
@@ -1253,40 +1233,16 @@ describe('geometry data type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiPolygon' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiPolygon' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiPolygon' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'MultiPolygon' } : null
       }
     ];
     let rows = await shareConn.query('SELECT * FROM gis_multi_polygon_insert');
@@ -1304,6 +1260,7 @@ describe('geometry data type', () => {
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expected);
+    await shareConn.commit();
   });
 
   it('Geometry collection format', async function () {
@@ -1313,7 +1270,8 @@ describe('geometry data type', () => {
 
     const conn = await base.createConnection();
     await conn.query('DROP TABLE IF EXISTS gis_geometrycollection');
-    await shareConn.query('CREATE TABLE gis_geometrycollection (g GEOMETRYCOLLECTION)');
+    await conn.query('CREATE TABLE gis_geometrycollection (g GEOMETRYCOLLECTION)');
+    await conn.beginTransaction();
     await conn.query(
       'INSERT INTO gis_geometrycollection VALUES\n' +
         "    (ST_GeomCollFromText('GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(0 0,10 10))')),\n" +
@@ -1417,12 +1375,12 @@ describe('geometry data type', () => {
     rows = await conn.execute('SELECT * FROM gis_geometrycollection');
     assert.deepEqual(rows, expectedValue);
 
-    rows = await shareConn.query({
+    rows = await conn.query({
       sql: 'SELECT * FROM gis_geometrycollection',
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expectedValue);
-    rows = await shareConn.execute({
+    rows = await conn.execute({
       sql: 'SELECT * FROM gis_geometrycollection',
       typeCast: (column, next) => column.geometry()
     });
@@ -1437,7 +1395,8 @@ describe('geometry data type', () => {
 
     const conn = await base.createConnection();
     await conn.query('DROP TABLE IF EXISTS gis_geometrycollection_ins');
-    await shareConn.query('CREATE TABLE gis_geometrycollection_ins (g GEOMETRYCOLLECTION)');
+    await conn.query('CREATE TABLE gis_geometrycollection_ins (g GEOMETRYCOLLECTION)');
+    await conn.beginTransaction();
     await conn.query('INSERT INTO gis_geometrycollection_ins VALUES (?)', [
       {
         type: 'GeometryCollection',
@@ -1636,12 +1595,12 @@ describe('geometry data type', () => {
     assert.deepEqual(rows, expected);
     rows = await conn.execute('SELECT * FROM gis_geometrycollection_ins');
     assert.deepEqual(rows, expected);
-    rows = await shareConn.query({
+    rows = await conn.query({
       sql: 'SELECT * FROM gis_geometrycollection_ins',
       typeCast: (column, next) => column.geometry()
     });
     assert.deepEqual(rows, expected);
-    rows = await shareConn.execute({
+    rows = await conn.execute({
       sql: 'SELECT * FROM gis_geometrycollection_ins',
       typeCast: (column, next) => column.geometry()
     });

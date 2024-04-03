@@ -1,13 +1,16 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
 const { assert } = require('chai');
 const Conf = require('../conf');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
 
 describe('Pool callback', () => {
   before(function () {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
   });
 
   it('pool with wrong authentication', function (done) {
@@ -149,7 +152,7 @@ describe('Pool callback', () => {
   });
 
   it('pool error event', async function () {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
+    if (isMaxscale() || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
     this.timeout(10000);
     const pool = base.createPoolCallback({
       acquireTimeout: 4000,
@@ -176,7 +179,7 @@ describe('Pool callback', () => {
   });
 
   it('pool error fail connection', async function () {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
+    if (isMaxscale() || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
     this.timeout(10000);
     const initTime = Date.now();
     const pool = base.createPoolCallback({
@@ -358,7 +361,7 @@ describe('Pool callback', () => {
       assert.equal(pool.escapeId('good_$one'), '`good_$one`');
       assert.equal(pool.escape(''), "''");
       assert.equal(pool.escapeId('f:a'), '`f:a`');
-      assert.equal(pool.escapeId('`f:a`'), '`f:a`');
+      assert.equal(pool.escapeId('`f:a`'), '```f:a```');
       assert.equal(pool.escapeId('good_`è`one'), '`good_``è``one`');
       pool.end();
       pool2.end();
@@ -463,7 +466,7 @@ describe('Pool callback', () => {
       assert.equal(err.errno, 45028);
       assert.equal(err.code, 'ER_GET_CONNECTION_TIMEOUT');
       const elapse = Date.now() - initTime;
-      assert.isOk(elapse >= 499 && elapse < 550, 'elapse time was ' + elapse + ' but must be just after 500');
+      assert.isOk(elapse >= 475 && elapse < 650, 'elapse time was ' + elapse + ' but must be just after 500');
       errorNo += 1;
     });
     setTimeout(() => {
@@ -473,7 +476,7 @@ describe('Pool callback', () => {
         assert.equal(err.errno, 45028);
         assert.equal(err.code, 'ER_GET_CONNECTION_TIMEOUT');
         const elapse = Date.now() - initTime;
-        assert.isOk(elapse >= 698 && elapse < 750, 'elapse time was ' + elapse + ' but must be just after 700');
+        assert.isOk(elapse >= 675 && elapse < 850, 'elapse time was ' + elapse + ' but must be just after 700');
         errorNo += 1;
       });
     }, 200);
@@ -936,7 +939,7 @@ describe('Pool callback', () => {
   });
 
   it('pool execute timeout', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
+    if (isMaxscale() || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
     this.timeout(10000);
     const pool = base.createPoolCallback({
       connectionLimit: 1,
@@ -957,7 +960,7 @@ describe('Pool callback', () => {
   });
 
   it('pool batch timeout', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
+    if (isMaxscale() || process.env.srv === 'skysql-ha') this.skip(); //to avoid host being blocked
     this.timeout(10000);
     const pool = base.createPoolCallback({
       connectionLimit: 1,

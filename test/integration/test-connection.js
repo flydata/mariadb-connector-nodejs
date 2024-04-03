@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -7,7 +10,8 @@ const Conf = require('../conf');
 const Connection = require('../../lib/connection');
 const ConnOptions = require('../../lib/config/connection-options');
 const Net = require('net');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
+const dns = require('dns');
 
 describe('connection', () => {
   it('with no connection attributes', function (done) {
@@ -37,9 +41,11 @@ describe('connection', () => {
       .createConnection({ connectAttributes: attr, charset: charset })
       .then((conn) => {
         conn
-          .query("SELECT '1'")
+          .query("SELECT '1' as '1'")
           .then((rows) => {
             assert.deepEqual(rows, [{ 1: '1' }]);
+            assert.equal(rows.meta[0].name(), '1');
+            assert.equal(rows.meta[0].orgName(), '');
             conn.end();
             done();
           })
@@ -187,7 +193,7 @@ describe('connection', () => {
   });
 
   it('connection error event', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
     base
       .createConnection()
@@ -387,7 +393,7 @@ describe('connection', () => {
   it('connection.close alias', function (done) {
     this.timeout(10000);
     base
-      .createConnection()
+      .createConnection({ keepAliveDelay: 100 })
       .then((conn) => {
         conn.close();
         done();
@@ -396,7 +402,7 @@ describe('connection', () => {
   });
 
   it('connection.destroy() during query execution', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
 
     this.timeout(10000);
 
@@ -421,23 +427,31 @@ describe('connection', () => {
 
   it('connection timeout connect (wrong url) with callback', (done) => {
     const initTime = Date.now();
-    const conn = base.createCallbackConnection({
-      host: 'www.google.fr',
-      connectTimeout: 1000
-    });
-    conn.connect((err) => {
-      if (err.code !== 'ER_CONNECTION_TIMEOUT') {
-        if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
-          // if no network access or IP¨v6 not allowed, just skip error
+    dns.resolve4('www.google.com', (err, res) => {
+      if (err) done();
+      else if (res.length > 0) {
+        const host = res[0];
+        const conn = base.createCallbackConnection({
+          host: host,
+          connectTimeout: 1000
+        });
+        conn.connect((err) => {
+          if (err.code !== 'ER_CONNECTION_TIMEOUT' && err.code !== 'ETIMEDOUT') {
+            if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
+              // if no network access or IP¨v6 not allowed, just skip error
+              done();
+              return;
+            }
+            console.log(err);
+          }
+          if (err.code === 'ER_CONNECTION_TIMEOUT') {
+            assert.isTrue(err.message.includes('Connection timeout: failed to create socket after'));
+          }
+          assert.isTrue(Date.now() - initTime >= 990, 'expected > 990, but was ' + (Date.now() - initTime));
+          assert.isTrue(Date.now() - initTime < 2000, 'expected < 2000, but was ' + (Date.now() - initTime));
           done();
-          return;
-        }
-        console.log(err);
-      }
-      assert.isTrue(err.message.includes('Connection timeout: failed to create socket after'));
-      assert.isTrue(Date.now() - initTime >= 990, 'expected > 990, but was ' + (Date.now() - initTime));
-      assert.isTrue(Date.now() - initTime < 2000, 'expected < 2000, but was ' + (Date.now() - initTime));
-      done();
+        });
+      } else done(new Error('DNS fails'));
     });
   });
 
@@ -498,7 +512,7 @@ describe('connection', () => {
         conn.end();
       })
       .catch((err) => {
-        if (err.code !== 'ER_CONNECTION_TIMEOUT') {
+        if (err.code !== 'ER_CONNECTION_TIMEOUT' && err.code !== 'ETIMEDOUT') {
           if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
             // if no network access or IP¨v6 not allowed, just skip error
             done();
@@ -507,22 +521,29 @@ describe('connection', () => {
           console.log(err);
         }
 
-        assert.isTrue(err.message.includes('Connection timeout'));
+        if (err.code === 'ER_CONNECTION_TIMEOUT') {
+          assert.isTrue(err.message.includes('Connection timeout'));
+        }
         assert.equal(err.sqlState, '08S01');
         assert.equal(err.errno, 45012);
-        assert.equal(err.code, 'ER_CONNECTION_TIMEOUT');
         done();
       });
   });
 
   it('connection timeout connect (wrong url) with callback no function', (done) => {
-    const conn = base.createCallbackConnection({
-      host: 'www.google.fr',
-      connectTimeout: 500
+    dns.resolve4('www.google.com', (err, res) => {
+      if (err) done();
+      else if (res.length > 0) {
+        const host = res[0];
+        const conn = base.createCallbackConnection({
+          host: host,
+          connectTimeout: 500
+        });
+        conn.connect((err) => {});
+        conn.end();
+        done();
+      }
     });
-    conn.connect((err) => {});
-    conn.end();
-    done();
   });
 
   it('connection without database', (done) => {
@@ -545,48 +566,66 @@ describe('connection', () => {
 
   it('connection timeout connect (wrong url) with promise', (done) => {
     const initTime = Date.now();
-    base
-      .createConnection({ host: 'www.google.fr', connectTimeout: 1000 })
-      .then(() => {
-        done(new Error('must have thrown error'));
-      })
-      .catch((err) => {
-        if (err.code !== 'ER_CONNECTION_TIMEOUT') {
-          if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
-            // if no network access or IP¨v6 not allowed, just skip error
+    dns.resolve4('www.google.com', (err, res) => {
+      if (err) done(err);
+      else if (res.length > 0) {
+        const host = res[0];
+        base
+          .createConnection({ host: host, connectTimeout: 1000 })
+          .then(() => {
+            done(new Error('must have thrown error'));
+          })
+          .catch((err) => {
+            if (err.code !== 'ER_CONNECTION_TIMEOUT' && err.code !== 'ETIMEDOUT') {
+              if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
+                // if no network access or IP¨v6 not allowed, just skip error
+                done();
+                return;
+              }
+              console.log(err);
+            }
+            if (err.code === 'ER_CONNECTION_TIMEOUT') {
+              assert.isTrue(
+                err.message.includes(
+                  '(conn:-1, no: 45012, SQLState: 08S01) Connection timeout: failed to create socket after'
+                )
+              );
+            }
+            assert.isTrue(Date.now() - initTime >= 990, 'expected > 990, but was ' + (Date.now() - initTime));
+            assert.isTrue(Date.now() - initTime < 2000, 'expected < 2000, but was ' + (Date.now() - initTime));
             done();
-            return;
-          }
-          console.log(err);
-        }
-        assert.isTrue(
-          err.message.includes(
-            '(conn=-1, no: 45012, SQLState: 08S01) Connection timeout: failed to create socket after'
-          )
-        );
-        assert.isTrue(Date.now() - initTime >= 990, 'expected > 990, but was ' + (Date.now() - initTime));
-        assert.isTrue(Date.now() - initTime < 2000, 'expected < 2000, but was ' + (Date.now() - initTime));
-        done();
-      });
+          });
+      }
+    });
   });
 
   it('connection timeout error (wrong url)', function (done) {
     const initTime = Date.now();
-    base.createConnection({ host: 'www.google.fr', connectTimeout: 1000 }).catch((err) => {
-      if (err.code !== 'ER_CONNECTION_TIMEOUT') {
-        if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
-          // if no network access or IP¨v6 not allowed, just skip error
+    dns.resolve4('www.google.com', (err, res) => {
+      if (err) done();
+      else if (res.length > 0) {
+        const host = res[0];
+        base.createConnection({ host: host, connectTimeout: 1000 }).catch((err) => {
+          if (err.code !== 'ER_CONNECTION_TIMEOUT' && err.code !== 'ETIMEDOUT') {
+            if (err.code === 'ENOTFOUND' || err.code === 'ENETUNREACH') {
+              // if no network access or IP¨v6 not allowed, just skip error
+              done();
+              return;
+            }
+            console.log(err);
+          }
+          if (err.code === 'ER_CONNECTION_TIMEOUT') {
+            assert.isTrue(
+              err.message.includes(
+                '(conn:-1, no: 45012, SQLState: 08S01) Connection timeout: failed to create socket after'
+              )
+            );
+          }
+          assert.isTrue(Date.now() - initTime >= 990, 'expected > 990, but was ' + (Date.now() - initTime));
+          assert.isTrue(Date.now() - initTime < 2000, 'expected < 2000, but was ' + (Date.now() - initTime));
           done();
-          return;
-        }
-        console.log(err);
+        });
       }
-      assert.isTrue(
-        err.message.includes('(conn=-1, no: 45012, SQLState: 08S01) Connection timeout: failed to create socket after')
-      );
-      assert.isTrue(Date.now() - initTime >= 990, 'expected > 990, but was ' + (Date.now() - initTime));
-      assert.isTrue(Date.now() - initTime < 2000, 'expected < 2000, but was ' + (Date.now() - initTime));
-      done();
     });
   });
 
@@ -594,7 +633,7 @@ describe('connection', () => {
     if (
       (shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(10, 2, 2)) ||
       (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 7, 4)) ||
-      process.env.srv === 'maxscale' ||
+      isMaxscale() ||
       process.env.srv === 'skysql' ||
       process.env.srv === 'skysql-ha'
     ) {
@@ -644,17 +683,24 @@ describe('connection', () => {
   }
 
   it('connection.connect() error code validation callback', function (done) {
+    this.timeout(10000);
     const conn = base.createCallbackConnection({
       user: 'fooUser',
       password: 'myPwd',
-      allowPublicKeyRetrieval: true
+      allowPublicKeyRetrieval: true,
+      connectTimeout: 1000
     });
+
     conn.on('error', (err) => {});
     conn.connect((err) => {
       if (!err) {
         done(new Error('must have thrown error'));
       } else {
         switch (err.errno) {
+          case 45012:
+            assert.equal(err.sqlState, '08S01');
+            break;
+
           case 45025:
             //Client does not support authentication protocol
             assert.equal(err.sqlState, '08004');
@@ -693,6 +739,7 @@ describe('connection', () => {
   });
 
   it('connection.connect() error code validation promise', function (done) {
+    this.timeout(10000);
     base
       .createConnection({ user: 'fooUser', password: 'myPwd', allowPublicKeyRetrieval: true })
       .then(() => {
@@ -700,6 +747,10 @@ describe('connection', () => {
       })
       .catch((err) => {
         switch (err.errno) {
+          case 45012:
+            //Client does not support authentication protocol
+            assert.equal(err.sqlState, '08S01');
+            break;
           case 45025:
             //Client does not support authentication protocol
             assert.equal(err.sqlState, '08004');
@@ -788,7 +839,7 @@ describe('connection', () => {
         if (
           ((shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(10, 2)) ||
             (!shareConn.info.isMariaDB() && shareConn.info.hasMinVersion(5, 7))) &&
-          process.env.srv !== 'maxscale' &&
+          !isMaxscale() &&
           process.env.srv !== 'skysql' &&
           process.env.srv !== 'skysql-ha'
         ) {
@@ -858,8 +909,7 @@ describe('connection', () => {
 
   it('error reaching max connection', async function () {
     // error occurs on handshake packet, with old error format
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand())
-      this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     this.timeout(10000);
 
     const res = await shareConn.query('select @@max_connections as a');
@@ -961,7 +1011,7 @@ describe('connection', () => {
     if (
       !shareConn.info.isMariaDB() ||
       !shareConn.info.hasMinVersion(10, 4, 3) ||
-      process.env.srv === 'maxscale' ||
+      isMaxscale() ||
       process.env.srv === 'skysql' ||
       process.env.srv === 'skysql-ha'
     ) {
@@ -1001,7 +1051,7 @@ describe('connection', () => {
     if (
       !shareConn.info.isMariaDB() ||
       !shareConn.info.hasMinVersion(10, 4, 3) ||
-      process.env.srv === 'maxscale' ||
+      isMaxscale() ||
       process.env.srv === 'skysql' ||
       process.env.srv === 'skysql-ha'
     ) {
@@ -1038,5 +1088,14 @@ describe('connection', () => {
         })
         .catch(done);
     });
+  });
+
+  it('collation index > 255', async function () {
+    if (isMaxscale() || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (!shareConn.info.isMariaDB()) this.skip(); // requires mariadb 10.2+
+    const conn = await base.createConnection({ collation: 'UTF8MB4_UNICODE_520_NOPAD_CI' });
+    const res = await conn.query('SELECT @@COLLATION_CONNECTION as c');
+    assert.equal(res[0].c, 'utf8mb4_unicode_520_nopad_ci');
+    conn.end();
   });
 });

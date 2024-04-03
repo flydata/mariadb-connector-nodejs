@@ -1,12 +1,23 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
 const { assert } = require('chai');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
+const Conf = require('../conf');
+const Capabilities = require('../../lib/const/capabilities');
 
 describe('TypeCast', () => {
+  let serverPermitExtendedInfos;
+  before(function () {
+    serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+  });
+
   const changeCaseCast = (column, next) => {
-    if (column.type == 'VAR_STRING') {
+    if (column.type === 'VAR_STRING') {
       const val = column.string();
       if (column.name().startsWith('upp')) return val.toUpperCase();
       if (column.name().startsWith('low')) return val.toLowerCase();
@@ -97,15 +108,15 @@ describe('TypeCast', () => {
 
   it('TINY(1) to boolean cast', async function () {
     const tinyToBoolean = (column, next) => {
-      if (column.type == 'TINY' && column.columnLength === 1) {
+      if (column.type === 'TINY' && column.columnLength === 1) {
         const val = column.tiny();
         return val === null ? null : val === 1;
       }
-      if (column.type == 'SHORT') {
+      if (column.type === 'SHORT') {
         const val = column.short();
         return val === null ? null : val + 1;
       }
-      if (column.type == 'INT') {
+      if (column.type === 'INT') {
         const val = column.int();
         return val === null ? null : val + 1;
       }
@@ -136,11 +147,11 @@ describe('TypeCast', () => {
   it('long cast', async function () {
     this.timeout(5000);
     const longCast = (column, next) => {
-      if (column.type == 'TINY' && column.columnLength === 1) {
+      if (column.type === 'TINY' && column.columnLength === 1) {
         const val = column.tiny();
         return val == null ? null : Number(val);
       }
-      if (column.type == 'VAR_STRING') {
+      if (column.type === 'VAR_STRING') {
         const val = column.string();
         return val == null ? null : Number(val);
       }
@@ -167,11 +178,11 @@ describe('TypeCast', () => {
   it('date cast', async function () {
     this.timeout(5000);
     const longCast = (column, next) => {
-      if (column.type == 'TIMESTAMP' || column.type == 'DATETIME') {
+      if (column.type === 'TIMESTAMP' || column.type === 'DATETIME') {
         let da = column.datetime();
         return da == null ? null : da.getMinutes();
       }
-      if (column.type == 'DATE') {
+      if (column.type === 'DATE') {
         let da = column.date();
         return da == null ? null : da.getMonth() + 1;
       }
@@ -203,13 +214,14 @@ describe('TypeCast', () => {
     if (isXpand()) this.skip();
     this.timeout(5000);
     const longCast = (column, next) => {
-      if (column.type == 'BINARY') {
+      if (column.type === 'BINARY') {
         return column.geometry();
       }
       return next();
     };
     const conn = await base.createConnection({ typeCast: longCast });
     await conn.query('DROP TABLE IF EXISTS stupidCast');
+    await conn.beginTransaction();
     await conn.query('CREATE TABLE stupidCast(b1 POINT)');
     await conn.query('INSERT INTO stupidCast VALUES (?), (?),(null)', [
       {
@@ -235,13 +247,7 @@ describe('TypeCast', () => {
         }
       },
       {
-        b1:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Point' }
-            : null
+        b1: serverPermitExtendedInfos ? { type: 'Point' } : null
       }
     ];
     let rows = await conn.query('SELECT * from stupidCast');

@@ -1,8 +1,11 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
 const { assert } = require('chai');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
 
 describe('Error', () => {
   after((done) => {
@@ -24,8 +27,8 @@ describe('Error', () => {
             done(new Error('must have thrown error !'));
           })
           .catch((err) => {
-            assert.isTrue(err.stack.includes('test-error.js'));
             assert.isTrue(err != null);
+            assert.isTrue(err.stack.includes('test-error.js'));
             if (err.errno === 1141) {
               // SKYSQL ERROR
               assert.isTrue(
@@ -71,7 +74,6 @@ describe('Error', () => {
           done(new Error('must have thrown error !'));
         } else {
           assert.isTrue(err.stack.includes('test-error.js'));
-          assert.isTrue(err != null);
           if (err.errno === 1141) {
             // SKYSQL ERROR
             assert.isTrue(
@@ -151,8 +153,8 @@ describe('Error', () => {
             } else {
               if (!isXpand()) {
                 assert.isTrue(err.message.includes('You have an error in your SQL syntax'));
-                assert.isTrue(err.message.includes("sql: wrong query ?, ? - parameters:[123456789,'long paramete...]"));
-                assert.equal(err.sql, "wrong query ?, ? - parameters:[123456789,'long paramete...]");
+                assert.isTrue(err.message.includes("sql: wrong query ?, ? - parameters:[123456789,'long paramete..."));
+                assert.equal(err.sql, "wrong query ?, ? - parameters:[123456789,'long paramete...");
                 assert.equal(err.sqlState, 42000);
               }
               assert.equal(err.errno, 1064);
@@ -254,8 +256,8 @@ describe('Error', () => {
               assert.equal(err.errno, 1064);
               assert.equal(err.code, 'ER_PARSE_ERROR');
             }
-            assert.isTrue(err.message.includes("sql: wrong query :par1, :par2 - parameters:{'par1':'some par...}"));
-            assert.equal(err.sql, "wrong query :par1, :par2 - parameters:{'par1':'some par...}");
+            assert.isTrue(err.message.includes("sql: wrong query :par1, :par2 - parameters:{'par1':'some par..."));
+            assert.equal(err.sql, "wrong query :par1, :par2 - parameters:{'par1':'some par...");
 
             conn.end();
             done();
@@ -274,8 +276,8 @@ describe('Error', () => {
             done(new Error('must have thrown error !'));
           })
           .catch((err) => {
-            assert.isTrue(!err.stack.includes('test-error.js'));
             assert.isTrue(err != null);
+            assert.isTrue(!err.stack.includes('test-error.js'));
             if (err.errno === 1141) {
               // SKYSQL ERROR
               assert.isTrue(
@@ -366,7 +368,7 @@ describe('Error', () => {
 
   it('server close connection without warning', function (done) {
     //removed for maxscale, since wait_timeout will be set to other connections
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     this.timeout(20000);
     let connectionErr = false;
     base
@@ -408,8 +410,7 @@ describe('Error', () => {
 
   it('server close connection - no connection error event', function (done) {
     this.timeout(20000);
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand())
-      this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     // Remove Mocha's error listener
     const originalException = process.listeners('uncaughtException').pop();
     process.removeListener('uncaughtException', originalException);
@@ -452,7 +453,7 @@ describe('Error', () => {
   });
 
   it('server close connection during query', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     this.timeout(20000);
     base
       .createConnection()
@@ -464,7 +465,7 @@ describe('Error', () => {
             done(new Error('must have thrown error !'));
           })
           .catch((err) => {
-            if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') {
+            if (isMaxscale() || process.env.srv === 'skysql-ha') {
               assert.isTrue(err.message.includes('Lost connection to backend server'), err.message);
               assert.equal(err.sqlState, 'HY000');
             } else {
@@ -482,7 +483,7 @@ describe('Error', () => {
   });
 
   it('end connection query error', async function () {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql-ha') this.skip();
     const conn = await base.createConnection();
     setTimeout(() => {
       conn.__tests.getSocket().destroy(new Error('close forced'));
@@ -537,9 +538,11 @@ describe('Error', () => {
   it('query undefined parameter', async function () {
     await shareConn.query('DROP TABLE IF EXISTS undefinedParameter');
     await shareConn.query('CREATE TABLE undefinedParameter (id int, id2 int, id3 int)');
+    await shareConn.beginTransaction();
     await shareConn.query('INSERT INTO undefinedParameter values (?, ?, ?)', [1, undefined, 3]);
     const rows = await shareConn.query('SELECT * from undefinedParameter');
     assert.deepEqual(rows, [{ id: 1, id2: null, id3: 3 }]);
+    await shareConn.commit();
   });
 
   it('query missing parameter', function (done) {

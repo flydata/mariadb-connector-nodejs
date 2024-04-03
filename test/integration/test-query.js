@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -32,12 +35,13 @@ describe('basic query', () => {
   });
 
   it('query metaEnumerable', async function () {
+    let propertyName;
     let rows = await shareConn.query({ sql: 'select ? as a', metaEnumerable: false }, null);
     assert.equal(rows.meta.length, 1);
     assert.equal(JSON.stringify(rows), '[{"a":null}]');
     assert.deepStrictEqual(rows, [{ a: null }]);
     let nb = 0;
-    for (var propertyName in rows) {
+    for (propertyName in rows) {
       nb++;
     }
     assert.equal(nb, 1);
@@ -46,7 +50,7 @@ describe('basic query', () => {
     assert.equal(rows.meta.length, 1);
 
     nb = 0;
-    for (var propertyName in rows) {
+    for (propertyName in rows) {
       nb++;
     }
     assert.equal(nb, 2);
@@ -64,6 +68,30 @@ describe('basic query', () => {
     conn.end();
   });
 
+  it('namedPlaceholders parameter', async () => {
+    const conn = await base.createConnection({ namedPlaceholders: true });
+    await conn.query('DROP TABLE IF EXISTS namedPlaceholders1');
+    await conn.query('CREATE TABLE namedPlaceholders1(t varchar(128))');
+    await conn.query('START TRANSACTION'); // if MAXSCALE ensure using WRITER
+    await conn.query("INSERT INTO `namedPlaceholders1` value ('a'), ('b'), ('c')");
+    const res = await conn.query('select * from `namedPlaceholders1` where t IN (:possible)', { possible: ['a', 'c'] });
+    assert.deepEqual(res, [{ t: 'a' }, { t: 'c' }]);
+    conn.end();
+  });
+
+  it('promise query stack trace', async function () {
+    if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    const conn = await base.createConnection({ trace: true });
+    try {
+      await conn.query('wrong query');
+    } catch (err) {
+      assert.isTrue(err.stack.includes('From event:\n    at ConnectionPromise.query'), err.stack);
+      assert.isTrue(err.stack.includes('test-query.js:'), err.stack);
+    } finally {
+      conn.end();
+    }
+  });
+
   it('query stack trace', function (done) {
     if (process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     const conn = base.createCallbackConnection({ trace: true });
@@ -72,6 +100,7 @@ describe('basic query', () => {
         if (!err) {
           done(Error('must have thrown error !'));
         } else {
+          assert.isTrue(err.stack.includes('From event:\n    at ConnectionCallback.query'), err.stack);
           assert.isTrue(err.stack.includes('test-query.js:'), err.stack);
           conn.end();
           done();
@@ -120,8 +149,8 @@ describe('basic query', () => {
     const conn = await base.createConnection();
     await conn.query('DROP TABLE IF EXISTS testArrayParameter');
     await conn.query('CREATE TABLE testArrayParameter (val1 int, val2 int)');
+    await conn.query('START TRANSACTION'); // if MAXSCALE ensure using WRITER
     await conn.query('INSERT INTO testArrayParameter VALUES (1,1), (1,2), (1,3), (2,2)');
-
     const query = 'SELECT * FROM testArrayParameter WHERE val1 = ? AND val2 IN (?)';
     const res = await conn.query(query, [1, [1, 3]]);
     assert.deepEqual(res, [
@@ -301,7 +330,7 @@ describe('basic query', () => {
     let insert = 'INSERT INTO myTable VALUES (';
     let expRes = {};
     for (let i = 0; i < 255; i++) {
-      if (i != 0) {
+      if (i !== 0) {
         table += ',';
         insert += ',';
       }
@@ -330,7 +359,7 @@ describe('basic query', () => {
     await shareConn.query('INSERT INTO tt1 VALUES (?,?)', [1, 'jack\nkमस्']);
     const res = await shareConn.query('SELECT * FROM tt1');
     assert.equal(res[0].tt, 'jack\nkमस्');
-    shareConn.commit;
+    shareConn.commit();
   });
 
   it('permitSetMultiParamEntries escape ', function (done) {
@@ -357,6 +386,20 @@ describe('basic query', () => {
         done();
       });
     });
+  });
+
+  it('toSqlString escape', async function () {
+    const fctStr = new Object();
+    fctStr.toSqlString = () => {
+      return "bla'bla";
+    };
+    await shareConn.query('DROP TABLE IF EXISTS tt1');
+    await shareConn.query('CREATE TABLE tt1 (id int, tt varchar(256)) CHARSET utf8mb4');
+    await shareConn.beginTransaction();
+    await shareConn.query('INSERT INTO tt1 VALUES (?,?)', [1, fctStr]);
+    const res = await shareConn.query('SELECT * FROM tt1');
+    assert.equal(res[0].tt, "bla'bla");
+    shareConn.commit();
   });
 
   it('timeout', function (done) {

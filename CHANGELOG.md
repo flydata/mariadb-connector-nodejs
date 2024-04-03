@@ -1,5 +1,55 @@
 # Change Log
 
+## [3.3.0](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.3.0) (Mar 2024)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.2.3...3.3.0)
+
+## Notable changes
+* CONJS-284 pipeline PREPARE and EXECUTE
+* CONJS-264 TLS ephemeral certificate automatic implementation
+* CONJS-279 Improve text encoding decoding
+
+## Issues Fixed
+* CONJS-281 cannot connect to 11.3+ server with character-set-collations = utf8mb4=uca1400_ai_ci		
+* CONJS-277 using connection.importFile when connection is not connected to database result in error		
+* CONJS-278 Possible buffer overwrite when sending query bigger than 16M
+* CONJS-282 error when using mysql_clear_test password authentication plugin		
+* CONJS-283 wrong decoding of binary unsigned MEDIUMINT
+* CONJS-285 DECIMAL field wrong decoding with deprecated option 'supportBigNumbers' set
+
+## [3.2.3](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.2.3) (Dec 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.2.2...3.2.3)
+
+* CONJS-207 Add support for connection redirection
+* CONJS-271 wrong binary decoding of 00:00:00 TIME values
+* CONJS-272 Error doesn't always have parameters according to option
+* CONJS-273 Bulk insert error when last bunch of parameters is reaching max_allowed_packet
+* CONJS-274 permit disabling BULK insert for one batch
+* CONJS-207 Add support for connection redirection
+
+
+## [3.2.2](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.2.2) (Oct 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.2.1...3.2.2)
+
+## Issues Fixed
+* CONJS-270 Always send connection attributes, even when connectAttributes is not set
+* CONJS-269 avoid useless "set names utf8mb4" on connection creation if not needed
+* CONJS-268 importFile method doesn't always throw error when imported commands fails #253
+* CONJS-267 Ensure that option collation with id > 255 are respected
+
+
+## [3.2.1](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.2.1) (Sep 2023)
+[Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.2.0...3.2.1)
+
+## Notable changes
+* CONJS-262 Binary result-set parsing performance improvement, avoiding to chromium slow issue https://bugs.chromium.org/p/v8/issues/detail?id=7161 
+* CONJS-265 permit configuration of console warning message to be exported
+* CONJS-266 Option `infileStreamFactory` addition for compatibility
+
+## Issues Fixed
+* CONJS-261 TypeScript missing logParam connection option
+* CONJS-263 ensure respecting server collation
+
+
 ## [3.2.0](https://github.com/mariadb-corporation/mariadb-connector-nodejs/tree/3.2.0) (Jun 2023)
 [Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-nodejs/compare/3.1.2...3.2.0)
 
@@ -129,7 +179,7 @@ prepare.close();
       });
       await pool.query('wrong query');
       /* will throw an error like :
-        SqlError: (conn=15868, no: 1064, SQLState: 42000) You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'wrong query' at line 1
+        SqlError: (conn:15868, no: 1064, SQLState: 42000) You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'wrong query' at line 1
           sql: wrong query - parameters:[]
             at Object.module.exports.createError (errors.js:57:10)
             at ...
@@ -146,7 +196,7 @@ prepare.close();
       ```
   * Pool error description is improved indicating pool information, like [CONJS-208]:
     ```javascript
-    SqlError: (conn=-1, no: 45028, SQLState: HY000) retrieve connection from pool timeout after 200ms
+    SqlError: (conn:-1, no: 45028, SQLState: HY000) retrieve connection from pool timeout after 200ms
       (pool connections: active=1 idle=0 limit=1)
       at Object.module.exports.createError
       …

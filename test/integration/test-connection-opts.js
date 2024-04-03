@@ -1,19 +1,33 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
 const { assert } = require('chai');
+const { isMaxscale } = require('../base');
 
 describe('connection option', () => {
   it('with undefined collation', function (done) {
+    if (process.env.srv === 'xpand') this.skip();
     base
       .createConnection({ charset: 'unknown' })
       .then(() => {
         done(new Error('must have thrown error!'));
       })
       .catch((err) => {
-        assert(err.message.includes('Unknown charset'));
+        assert(err.message.includes('Unknown'));
         done();
       });
+  });
+
+  it('collation with no id', async function () {
+    if (process.env.srv === 'xpand' || process.env.srv === 'mariadb-es' || process.env.srv === 'mariadb-es-test')
+      this.skip();
+    if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(11, 2, 0)) this.skip();
+    const conn = await base.createConnection();
+    await conn.query('set NAMES utf8mb4 COLLATE uca1400_vietnamese_ai_ci');
+    conn.end();
   });
 
   it('wrong IANA timezone', function (done) {
@@ -32,12 +46,12 @@ describe('connection option', () => {
   });
 
   it('ensure Etc/GMT', async function () {
-    let conn = await base.createConnection({ timezone: 'Etc/GMT-8', debug: true });
+    let conn = await base.createConnection({ timezone: 'Etc/GMT-8' });
     let res = await conn.query('SELECT @@time_zone as t');
     assert.equal(res[0].t, '+08:00');
     conn.end();
 
-    conn = await base.createConnection({ timezone: 'GMT-8', debug: true });
+    conn = await base.createConnection({ timezone: 'GMT-8' });
     res = await conn.query('SELECT @@time_zone as t');
     assert.equal(res[0].t, '-08:00');
     conn.end();
@@ -69,7 +83,7 @@ describe('connection option', () => {
   });
 
   it('timezone +0h', async function () {
-    const conn = await base.createConnection({ timezone: '+00:00', debug: true });
+    const conn = await base.createConnection({ timezone: '+00:00' });
 
     let d = new Date('2000-01-01T00:00:00Z');
     let res = await conn.query("SELECT UNIX_TIMESTAMP('2000-01-01T00:00:00') tt", [d]);
@@ -150,7 +164,7 @@ describe('connection option', () => {
     // node.js before v13 doesn't permit to set TZ value repeatedly
     if (parseInt(process.versions.node.split('.')[0]) <= 12) this.skip();
 
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     //MySQL 5.5 doesn't have milliseconds
     if (!shareConn.info.isMariaDB() && !shareConn.info.hasMinVersion(5, 6, 0)) this.skip();
     const defaultTz = process.env.TZ;
@@ -347,7 +361,7 @@ describe('connection option', () => {
           conn
             .query({
               timeout: 1000,
-              sql: 'SELECT 1;select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
+              sql: 'select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
             })
             .then(() => {
               conn.end();
@@ -373,7 +387,7 @@ describe('connection option', () => {
           conn
             .query({
               timeout: 1000,
-              sql: 'SELECT 1;select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
+              sql: 'select c1.* from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2'
             })
             .then(() => {
               conn.end();

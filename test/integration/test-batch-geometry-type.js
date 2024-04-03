@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -8,16 +11,20 @@ const { isXpand } = require('../base');
 
 describe('batch geometry type', () => {
   let supportBulk;
+  let serverPermitExtendedInfos;
   before(function () {
     supportBulk = (Conf.baseConfig.bulk === undefined ? true : Conf.baseConfig.bulk)
       ? (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_STMT_BULK_OPERATIONS) > 0
       : false;
+    serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
   });
 
   it('Point format', async function () {
     // xpand doesn't support geometry
     // https://jira.mariadb.org/browse/XPT-12
     if (!shareConn.info.isMariaDB() || isXpand()) this.skip();
+
     await shareConn.query('DROP TABLE IF EXISTS gis_point_batch');
     await shareConn.query('CREATE TABLE gis_point_batch  (g POINT)');
     await shareConn.query('FLUSH TABLES');
@@ -86,22 +93,10 @@ describe('batch geometry type', () => {
         }
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Point' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Point' } : null
       },
       {
-        g:
-          shareConn.info.isMariaDB() &&
-          shareConn.info.hasMinVersion(10, 5, 2) &&
-          process.env.srv !== 'maxscale' &&
-          process.env.srv !== 'skysql-ha'
-            ? { type: 'Point' }
-            : null
+        g: serverPermitExtendedInfos ? { type: 'Point' } : null
       }
     ]);
     shareConn.commit();
@@ -111,6 +106,9 @@ describe('batch geometry type', () => {
     // xpand doesn't support geometry
     // https://jira.mariadb.org/browse/XPT-12
     if (!shareConn.info.isMariaDB() || isXpand()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+
     await shareConn.query('DROP TABLE IF EXISTS gis_line_batch');
     await shareConn.query('CREATE TABLE gis_line_batch (g LINESTRING)');
     await shareConn.query('FLUSH TABLES');
@@ -169,17 +167,12 @@ describe('batch geometry type', () => {
                 coordinates: [],
                 type: 'LineString'
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'LineString' }
-            : null
-        },
-        {
-          g:
-            shareConn.info.hasMinVersion(10, 5, 2) && process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha'
+            : serverPermitExtendedInfos
               ? { type: 'LineString' }
               : null
+        },
+        {
+          g: serverPermitExtendedInfos ? { type: 'LineString' } : null
         }
       ]);
     } else {
@@ -215,6 +208,9 @@ describe('batch geometry type', () => {
     // xpand doesn't support geometry
     // https://jira.mariadb.org/browse/XPT-12
     if (!shareConn.info.isMariaDB() || isXpand()) this.skip();
+    const serverPermitExtendedInfos =
+      (shareConn.info.serverCapabilities & Capabilities.MARIADB_CLIENT_EXTENDED_TYPE_INFO) > 0;
+
     await shareConn.query('DROP TABLE IF EXISTS gis_polygon_batch');
     await shareConn.query('CREATE TABLE gis_polygon_batch (g POLYGON)');
     await shareConn.query('FLUSH TABLES');
@@ -318,10 +314,7 @@ describe('batch geometry type', () => {
           }
         },
         {
-          g:
-            shareConn.info.hasMinVersion(10, 5, 2) && process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha'
-              ? { type: 'Polygon' }
-              : null
+          g: serverPermitExtendedInfos ? { type: 'Polygon' } : null
         },
         {
           g: supportBulk
@@ -329,17 +322,12 @@ describe('batch geometry type', () => {
                 type: 'Polygon',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'Polygon' }
-            : null
-        },
-        {
-          g:
-            shareConn.info.hasMinVersion(10, 5, 2) && process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha'
+            : serverPermitExtendedInfos
               ? { type: 'Polygon' }
               : null
+        },
+        {
+          g: serverPermitExtendedInfos ? { type: 'Polygon' } : null
         }
       ]);
     } else {
@@ -443,11 +431,9 @@ describe('batch geometry type', () => {
                 type: 'MultiPoint',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPoint' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiPoint' }
+              : null
         },
         {
           g: supportBulk
@@ -455,11 +441,9 @@ describe('batch geometry type', () => {
                 type: 'MultiPoint',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPoint' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiPoint' }
+              : null
         }
       ]);
     } else {
@@ -572,11 +556,9 @@ describe('batch geometry type', () => {
                 type: 'MultiLineString',
                 coordinates: [[]]
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiLineString' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiLineString' }
+              : null
         },
         {
           g: supportBulk
@@ -584,11 +566,9 @@ describe('batch geometry type', () => {
                 type: 'MultiLineString',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiLineString' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiLineString' }
+              : null
         },
         {
           g: supportBulk
@@ -596,11 +576,9 @@ describe('batch geometry type', () => {
                 type: 'MultiLineString',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiLineString' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiLineString' }
+              : null
         }
       ]);
     } else {
@@ -800,11 +778,9 @@ describe('batch geometry type', () => {
                 type: 'MultiPolygon',
                 coordinates: [[[]]]
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiPolygon' }
+              : null
         },
         {
           g: supportBulk
@@ -812,11 +788,9 @@ describe('batch geometry type', () => {
                 type: 'MultiPolygon',
                 coordinates: [[]]
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiPolygon' }
+              : null
         },
         {
           g: supportBulk
@@ -824,11 +798,9 @@ describe('batch geometry type', () => {
                 type: 'MultiPolygon',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiPolygon' }
+              : null
         },
         {
           g: supportBulk
@@ -836,11 +808,9 @@ describe('batch geometry type', () => {
                 type: 'MultiPolygon',
                 coordinates: []
               }
-            : shareConn.info.hasMinVersion(10, 5, 2) &&
-              process.env.srv !== 'maxscale' &&
-              process.env.srv !== 'skysql-ha'
-            ? { type: 'MultiPolygon' }
-            : null
+            : serverPermitExtendedInfos
+              ? { type: 'MultiPolygon' }
+              : null
         }
       ]);
     } else {

@@ -1,14 +1,21 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
 const { assert } = require('chai');
 const ServerStatus = require('../../lib/const/server-status');
 const Conf = require('../conf');
-const { isXpand } = require('../base');
+const { isXpand, isMaxscale } = require('../base');
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const winston = require('winston');
 
 describe('change user', () => {
   before(async () => {
-    if (process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha') {
+    if (process.env.srv !== 'skysql-ha') {
       await shareConn.query("DROP USER ChangeUser@'%'").catch((e) => {});
       await shareConn.query("DROP USER ChangeUser2@'%'").catch((e) => {});
       await shareConn.query('CREATE DATABASE IF NOT EXISTS test');
@@ -23,14 +30,52 @@ describe('change user', () => {
   });
 
   after(async () => {
-    if (process.env.srv !== 'maxscale' && process.env.srv !== 'skysql-ha') {
+    if (process.env.srv !== 'skysql-ha') {
       await shareConn.query("DROP USER ChangeUser@'%'").catch((e) => {});
       await shareConn.query("DROP USER ChangeUser2@'%'").catch((e) => {});
     }
   });
 
+  it('mysql change user error', async function () {
+    if (shareConn.info.isMariaDB()) this.skip();
+    let logged = false;
+    const conn = await base.createConnection({
+      logger: {
+        error: (msg) => {
+          logged = true;
+        }
+      }
+    });
+    try {
+      await conn.changeUser({ user: 'ChangeUser', password: 'm1P4ssw0@rd' });
+      throw new Error('must have thrown error');
+    } catch (err) {
+      assert.isTrue(logged);
+      assert.equal(err.errno, 45003);
+      assert.equal(err.code, 'ER_MYSQL_CHANGE_USER_BUG');
+      assert.isTrue(err.message.includes('method changeUser not available for MySQL server due to Bug #83472'));
+      assert.equal(err.sqlState, '0A000');
+    } finally {
+      await conn.end();
+    }
+
+    const conn2 = await base.createConnection();
+    try {
+      await conn2.changeUser({ user: 'ChangeUser', password: 'm1P4ssw0@rd' });
+      throw new Error('must have thrown error');
+    } catch (err) {
+      assert.isTrue(logged);
+      assert.equal(err.errno, 45003);
+      assert.equal(err.code, 'ER_MYSQL_CHANGE_USER_BUG');
+      assert.isTrue(err.message.includes('method changeUser not available for MySQL server due to Bug #83472'));
+      assert.equal(err.sqlState, '0A000');
+    } finally {
+      await conn2.end();
+    }
+  });
+
   it('basic change user using callback', function (done) {
-    if (process.env.srv == 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
@@ -56,7 +101,7 @@ describe('change user', () => {
   });
 
   it('wrong charset', function (done) {
-    if (process.env.srv == 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base.createConnection().then((conn) => {
       conn
@@ -77,25 +122,52 @@ describe('change user', () => {
   });
 
   it('wrong collation in charset', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
-    base.createConnection().then((conn) => {
-      conn
-        .changeUser({
-          user: 'ChangeUser',
-          password: 'm1P4ssw0@rd',
-          charset: 'UTF8MB4_UNICODE_CI'
-        })
-        .then(() => {
-          conn.end();
-          done();
-        })
-        .catch(done);
+    const tmpLogFile = path.join(os.tmpdir(), 'wrongCollation.txt');
+    try {
+      fs.unlinkSync(tmpLogFile);
+    } catch (e) {}
+    let logger = winston.createLogger({
+      transports: [new winston.transports.File({ filename: tmpLogFile })]
     });
+    base
+      .createConnection({
+        logger: {
+          warning: (msg) => logger.info(msg)
+        }
+      })
+      .then((conn) => {
+        conn
+          .changeUser({
+            user: 'ChangeUser',
+            password: 'm1P4ssw0@rd',
+            charset: 'UTF8MB4_UNICODE_CI'
+          })
+          .then(() => {
+            logger.end();
+            //wait 100ms to ensure stream has been written
+            setTimeout(() => {
+              conn.end();
+              const data = fs.readFileSync(tmpLogFile, 'utf8');
+              assert.isTrue(
+                data.includes(
+                  "warning: please use option 'collation' in replacement of 'charset' when using a collation name ('UTF8MB4_UNICODE_CI')"
+                ),
+                data
+              );
+              try {
+                fs.unlinkSync(tmpLogFile);
+              } catch (e) {}
+              done();
+            }, 100);
+          })
+          .catch(done);
+      });
   });
 
   it('wrong collation', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base.createConnection().then((conn) => {
       conn
@@ -108,7 +180,7 @@ describe('change user', () => {
           done(new Error('must have thrown error!'));
         })
         .catch((err) => {
-          assert(err.message.includes("Unknown collation 'wrong_collation'"));
+          assert(err.message.includes("Unknown collation 'WRONG_COLLATION'"));
           conn.end();
           done();
         });
@@ -116,7 +188,7 @@ describe('change user', () => {
   });
 
   it('basic change user using callback no function', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
@@ -136,7 +208,7 @@ describe('change user', () => {
   });
 
   it('callback change user without option', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     const conn = base.createCallbackConnection();
     conn.connect((err) => {
@@ -156,7 +228,7 @@ describe('change user', () => {
   });
 
   it('basic change user using promise', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
 
     base
@@ -195,7 +267,7 @@ describe('change user', () => {
   });
 
   it('change user using connection attributes', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
 
     base
@@ -234,7 +306,7 @@ describe('change user', () => {
   });
 
   it('basic change user using promise non node.js encoding', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
 
     base
@@ -274,7 +346,7 @@ describe('change user', () => {
   });
 
   it('change user with collation', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base
       .createConnection()
@@ -283,7 +355,7 @@ describe('change user', () => {
           .changeUser({
             user: 'ChangeUser',
             password: 'm1P4ssw0@rd',
-            collation: 'UTF8_PERSIAN_CI'
+            collation: 'UTF8MB4_PERSIAN_CI'
           })
           .then(() => {
             return conn.query('SELECT CURRENT_USER');
@@ -291,7 +363,7 @@ describe('change user', () => {
           .then((res) => {
             const user = res[0]['CURRENT_USER'];
             assert.equal(user, 'ChangeUser@%');
-            assert.equal(conn.__tests.getCollation().name, 'UTF8_PERSIAN_CI');
+            assert.equal(conn.__tests.getCollation().name, 'UTF8MB4_PERSIAN_CI');
             conn.end();
             done();
           })
@@ -314,7 +386,7 @@ describe('change user', () => {
   });
 
   it('autocommit state after changing user', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
     if (!shareConn.info.isMariaDB()) this.skip();
     base
       .createConnection()
@@ -336,7 +408,7 @@ describe('change user', () => {
             if (
               shareConn.info.isMariaDB() &&
               shareConn.info.hasMinVersion(10, 2, 2) &&
-              process.env.srv !== 'maxscale' &&
+              !isMaxscale() &&
               process.env.srv !== 'skysql-ha'
             ) {
               assert.equal(conn.info.database, 'test');
@@ -355,5 +427,21 @@ describe('change user', () => {
           .catch(done);
       })
       .catch(done);
+  });
+
+  it('collation index > 255', async function () {
+    if (process.env.srv === 'skysql-ha' || isXpand()) this.skip();
+    if (!shareConn.info.isMariaDB()) this.skip(); // requires mariadb 10.2+
+    const conn = await base.createConnection();
+    const res = await conn.query('SELECT @@COLLATION_CONNECTION as c');
+    assert.notEqual(res[0].c, 'utf8mb4_unicode_520_nopad_ci');
+    await conn.changeUser({
+      user: 'ChangeUser',
+      password: 'm1P4ssw0@rd',
+      collation: 'UTF8MB4_UNICODE_520_NOPAD_CI'
+    });
+    const res2 = await conn.query('SELECT @@COLLATION_CONNECTION as c');
+    assert.equal(res2[0].c, 'utf8mb4_unicode_520_nopad_ci');
+    conn.end();
   });
 });

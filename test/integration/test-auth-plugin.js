@@ -1,3 +1,6 @@
+//  SPDX-License-Identifier: LGPL-2.1-or-later
+//  Copyright (c) 2015-2024 MariaDB Corporation Ab
+
 'use strict';
 
 const base = require('../base.js');
@@ -6,6 +9,7 @@ const Conf = require('../conf');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { isMaxscale } = require('../base');
 
 describe('authentication plugin', () => {
   let rsaPublicKey = process.env.TEST_RSA_PUBLIC_KEY;
@@ -62,14 +66,14 @@ describe('authentication plugin', () => {
       } else {
         await shareConn.query("CREATE USER 'sha256User'@'%'");
         await shareConn.query(
-          "GRANT ALL PRIVILEGES ON *.* TO 'sha256User'@'%' IDENTIFIED WITH " + "sha256_password BY 'password'"
+          "GRANT ALL PRIVILEGES ON *.* TO 'sha256User'@'%' IDENTIFIED WITH sha256_password BY 'password'"
         );
       }
     }
   });
 
   it('ed25519 authentication plugin', async function () {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql-ha' || process.env.srv === 'skysql') this.skip();
     const self = this;
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 22)) this.skip();
 
@@ -132,7 +136,7 @@ describe('authentication plugin', () => {
 
   it('name pipe authentication plugin', function (done) {
     if (process.platform !== 'win32') this.skip();
-    if (process.env.srv === 'maxscale') this.skip();
+    if (isMaxscale()) this.skip();
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 1, 11)) this.skip();
     if (Conf.baseConfig.host !== 'localhost' && Conf.baseConfig.host !== 'mariadb.example.com') this.skip();
     const windowsUser = process.env.USERNAME;
@@ -234,22 +238,17 @@ describe('authentication plugin', () => {
     if (process.env.TEST_PAM_PORT != null) {
       testPort = parseInt(process.env.TEST_PAM_PORT);
     }
-    //password is unix password "myPwd"
-    try {
-      const conn = await base.createConnection({
-        user: process.env.TEST_PAM_USER,
-        password: process.env.TEST_PAM_PWD,
-        port: testPort
-      });
-      await conn.end();
-    } catch (err) {
-      if (err.errno !== 1045 && err.errno !== 1044) {
-        throw err;
-      }
-    }
+
+    const conn = await base.createConnection({
+      user: process.env.TEST_PAM_USER,
+      password: process.env.TEST_PAM_PWD,
+      port: testPort
+    });
+    await conn.end();
   });
 
   it('dialog authentication plugin multiple password', async function () {
+    if (isMaxscale()) this.skip();
     //pam is set using .travis/sql/pam.sh
     if (!process.env.TEST_PAM_USER) this.skip();
 
@@ -261,8 +260,16 @@ describe('authentication plugin', () => {
     try {
       await shareConn.query("DROP USER IF EXISTS '" + process.env.TEST_PAM_USER + "'@'%'");
     } catch (error) {}
+    try {
+      await shareConn.query("DROP USER IF EXISTS '" + process.env.TEST_PAM_USER + "'@'localhost'");
+    } catch (error) {}
+
     await shareConn.query("CREATE USER '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam USING 'mariadb'");
     await shareConn.query("GRANT SELECT ON *.* TO '" + process.env.TEST_PAM_USER + "'@'%' IDENTIFIED VIA pam");
+    await shareConn.query(
+      "CREATE USER '" + process.env.TEST_PAM_USER + "'@'localhost' IDENTIFIED VIA pam USING 'mariadb'"
+    );
+    await shareConn.query("GRANT SELECT ON *.* TO '" + process.env.TEST_PAM_USER + "'@'localhost' IDENTIFIED VIA pam");
     await shareConn.query('FLUSH PRIVILEGES');
 
     let testPort = Conf.baseConfig.port;
@@ -270,22 +277,16 @@ describe('authentication plugin', () => {
       testPort = parseInt(process.env.TEST_PAM_PORT);
     }
     //password is unix password "myPwd"
-    try {
-      const conn = await base.createConnection({
-        user: process.env.TEST_PAM_USER,
-        password: [process.env.TEST_PAM_PWD, process.env.TEST_PAM_PWD],
-        port: testPort
-      });
-      await conn.end();
-    } catch (err) {
-      if (err.errno !== 1045 && err.errno !== 1044) {
-        throw err;
-      }
-    }
+    const conn = await base.createConnection({
+      user: process.env.TEST_PAM_USER,
+      password: [process.env.TEST_PAM_PWD, process.env.TEST_PAM_PWD],
+      port: testPort
+    });
+    await conn.end();
   });
 
   it('multi authentication plugin', function (done) {
-    if (process.env.srv === 'maxscale' || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
+    if (isMaxscale() || process.env.srv === 'skysql' || process.env.srv === 'skysql-ha') this.skip();
     if (!shareConn.info.isMariaDB() || !shareConn.info.hasMinVersion(10, 4, 3)) this.skip();
     shareConn.query("drop user IF EXISTS mysqltest1@'%'").catch((err) => {});
     shareConn

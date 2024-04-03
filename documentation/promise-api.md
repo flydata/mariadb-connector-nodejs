@@ -105,7 +105,7 @@ const pool = mariadb.createPool({
 });
 await pool.query('wrong query');
 /* will throw an error like : 
-  SqlError: (conn=15868, no: 1064, SQLState: 42000) You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'wrong query' at line 1
+  SqlError: (conn:15868, no: 1064, SQLState: 42000) You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'wrong query' at line 1
 sql: wrong query - parameters:[]
     at Object.module.exports.createError (C:\temp\mariadb-connector-nodejs2\lib\misc\errors.js:57:10)
     at ...
@@ -154,7 +154,7 @@ await pool.query('wrong query');
 ```
 The caller method and line are now in error stack, permitting error easy debugging.
 
-The problem is this error stack is created using [Error.captureStackTrace](https://nodejs.org/api/errors.html#errorcapturestacktracetargetobject-constructoropt) that is very very slow. 
+The problem is this error stack is created using [Error.captureStackTrace](https://nodejs.org/api/errors.html#errorcapturestacktracetargetobject-constructoropt) that is super slow (hoping [node.js solved it at some point](https://github.com/nodejs/performance/issues/40)). 
 To give an idea, this slows down by 10% a query like 'select * from mysql.user LIMIT 1', so not recommended in production.
 
 ### Timezone consideration
@@ -437,7 +437,7 @@ Specific options for pools are :
 | **`acquireTimeout`** | Timeout to get a new connection from pool. In order to have connection error information, must be higher than connectTimeout. In milliseconds. | *integer* | 10000 |
 | **`connectionLimit`** | Maximum number of connection in pool. | *integer* | 10 |
 | **`idleTimeout`** | Indicate idle time after which a pool connection is released. Value must be lower than [@@wait_timeout](https://mariadb.com/kb/en/library/server-system-variables/#wait_timeout). In seconds. 0 means never release. | *integer* | 1800 |
-| **`initializationTimeout`** | Pool will retry creating connection in loop, emitting 'error' event when reaching this timeout. In milliseconds. | *integer* | 30000 |
+| **`initializationTimeout`** | Pool will retry creating connection in loop, emitting 'error' event when reaching this timeout. In milliseconds. | *integer* | `acquireTimeout` value |
 | **`minimumIdle`** | Permit to set a minimum number of connection in pool. **Recommendation is to use fixed pool, so not setting this value**. | *integer* | *set to connectionLimit value* |
 | **`minDelayValidation`** | When asking a connection to pool, the pool will validate the connection state. "minDelayValidation" permits disabling this validation if the connection has been borrowed recently avoiding useless verifications in case of frequent reuse of connections. In milliseconds. 0 means validation is done each time the connection is asked. | *integer* | 500 |
 | **`noControlAfterUse`** | After giving back connection to pool (connection.end) connector will reset or rollback connection to ensure a valid state. This option permit to disable those controls | *boolean* | false |
@@ -600,7 +600,7 @@ https.get(
 Queries return two different kinds of results, depending on the type of query you execute.  When you execute write statements, (such as `INSERT`, `DELETE` and `UPDATE`), the method returns a JSON object with the following properties:
 
 * `affectedRows`: An integer listing the number of affected rows.
-* `insertId`: An integer noting the auto-increment ID of the last row written to the table.
+* `insertId`: An integer noting the auto-increment ID. In case multiple rows have been inserted, this corresponds to the FIRST auto-increment value.
 * `warningStatus`: An integer indicating whether the query ended with a warning.
 
 ```js
@@ -669,7 +669,7 @@ try {
     });
 } catch (err) {
   // error is:
-  // SqlError: (conn=2987, no: 1969, SQLState: 70100) Query execution was interrupted (max_statement_time exceeded)
+  // SqlError: (conn:2987, no: 1969, SQLState: 70100) Query execution was interrupted (max_statement_time exceeded)
   // sql: select * from information_schema.columns as c1, information_schema.tables, information_schema.tables as t2 - parameters:[]
   // at Object.module.exports.createError (C:\projets\mariadb-connector-nodejs.git\lib\misc\errors.js:55:10)
   // at PacketNodeEncoded.readError (C:\projets\mariadb-connector-nodejs.git\lib\io\packet.js:510:19)
@@ -1418,7 +1418,7 @@ When the Connector encounters an error, Promise returns an [`Error`](https://dev
 
 Example on `console.log(error)`: 
 ```
-{ Error: (conn=116, no: 1146, SQLState: 42S02) Table 'testn.falsetable' doesn't exist
+{ Error: (conn:116, no: 1146, SQLState: 42S02) Table 'testn.falsetable' doesn't exist
   sql: INSERT INTO falseTable(t1, t2, t3, t4, t5) values (?, ?, ?, ?, ?)  - parameters:[1,0x01ff,'hh','01/01/2001 00:00:00.000',null]
       ...
       at Socket.Readable.push (_stream_readable.js:134:10)
@@ -1455,7 +1455,7 @@ conn.on('error', err => {
   //will be executed after 100ms due to inactivity, socket has closed. 
   console.log(err);
   //log : 
-  //{ Error: (conn=6283, no: 45026, SQLState: 08S01) socket timeout
+  //{ Error: (conn:6283, no: 45026, SQLState: 08S01) socket timeout
   //    ...
   //    at Socket.emit (events.js:208:7)
   //    at Socket._onTimeout (net.js:410:8)
